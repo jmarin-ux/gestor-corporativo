@@ -1,57 +1,140 @@
+'use client';
+
+import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
-import { UserPlus, ClipboardList, LogIn } from 'lucide-react';
+import { LogOut, ChevronDown, Shield, User } from 'lucide-react';
 
-export default function HomePage() {
+// Importamos las vistas
+import ManagementView from '@/components/dashboard/ManagementView';
+import CoordinatorView from '@/components/dashboard/CoordinatorView';
+import OperativeView from '@/components/dashboard/OperativeView';
+import ClientView from '@/components/dashboard/ClientView'; 
+
+function DashboardContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  
+  // 1. Estado para manejar el rol de forma segura
+  const [role, setRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    // 2. Lógica de detección de usuario
+    const roleParam = searchParams.get('role');
+    const sessionData = localStorage.getItem('kiosco_user');
+
+    if (roleParam) {
+      // Si la URL dice un rol (ej. ?role=admin), mandamos ese
+      setRole(roleParam);
+    } else if (sessionData) {
+      // ¡AQUÍ ESTÁ EL TRUCO! Si no hay URL pero hay sesión de Kiosco, 
+      // forzamos 'client' para que NO intente cargar el ManagementView
+      setRole('client');
+    } else {
+      // Si no hay nada de nada, solo entonces vamos a superadmin
+      setRole('superadmin');
+    }
+  }, [searchParams]);
+
+  const roleConfig: any = {
+    superadmin: { label: 'Super Admin', short: 'SU', bg: 'bg-[#E31D1A]' },
+    admin:      { label: 'Administrador', short: 'AD', bg: 'bg-blue-600' },
+    coordinador:{ label: 'Coordinación',  short: 'CO', bg: 'bg-purple-600' },
+    operativo:  { label: 'Operativo',     short: 'OP', bg: 'bg-emerald-600' },
+    client:     { label: 'Cliente',       short: 'CL', bg: 'bg-orange-500' },
+  };
+
+  // Evitamos que se renderice nada hasta que el useEffect decida el rol
+  if (!role) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center font-bold text-[#0a1e3f]">
+      Verificando credenciales...
+    </div>
+  );
+
+  const currentRole = roleConfig[role] || roleConfig.superadmin;
+
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* Navbar Minimalista */}
-      <nav className="bg-white border-b px-8 py-4 flex justify-between items-center shadow-sm">
-        <h1 className="text-xl font-bold text-slate-800 tracking-tight">
-          GESTOR <span className="text-blue-700">OPERATIVO</span>
-        </h1>
-      </nav>
-
-      {/* Hero Section */}
-      <section className="max-w-6xl mx-auto px-6 py-20 text-center">
-        <h2 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
-          Control y Seguimiento Corporativo
-        </h2>
-        <p className="text-lg text-slate-600 mb-12 max-w-2xl mx-auto">
-          Plataforma centralizada para la gestión de servicios, vinculación de mandos y despliegue técnico.
-        </p>
-
-        {/* Los 3 Accesos Principales */}
-        <div className="grid md:grid-cols-3 gap-8 text-left">
+    <main className="min-h-screen bg-slate-50 font-sans selection:bg-blue-200">
+      
+      {/* HEADER GLOBAL */}
+      <header className="bg-[#0a1e3f] sticky top-0 z-50 shadow-xl shadow-blue-900/20 text-white">
+        <div className="max-w-[1920px] mx-auto px-4 md:px-8 h-20 flex justify-between items-center">
           
-          <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-            <UserPlus className="text-blue-700 mb-4" size={32} />
-            <h3 className="text-xl font-bold mb-2 text-slate-800">Alta de Cliente</h3>
-            <p className="text-slate-500 mb-6 text-sm">Registro inicial para nuevos clientes en la red operativa.</p>
-            <Link href="/registro" className="block text-center bg-blue-700 text-white py-2 rounded-lg font-semibold hover:bg-blue-800 transition-colors">
-              Iniciar Registro
-            </Link>
+          <div className="flex items-center gap-3 md:gap-4">
+             <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 shadow-inner">
+                <Shield size={20} className="text-white" fill="currentColor" fillOpacity={0.3}/>
+             </div>
+             <div className="leading-none">
+                <h1 className="text-xl md:text-2xl font-black tracking-tighter">
+                  CORP<span className="text-blue-400">OPS</span>
+                </h1>
+                <p className="text-[10px] font-bold text-blue-200 uppercase tracking-[0.2em]">Console</p>
+             </div>
           </div>
+          
+          <div className="flex items-center gap-3 md:gap-6">
+            <div className="hidden md:flex relative group">
+                <div className="bg-white/10 hover:bg-white/20 transition-colors border border-white/10 rounded-full pl-4 pr-3 py-2 flex items-center gap-3 cursor-pointer backdrop-blur-md">
+                    <User size={14} className="text-blue-200"/>
+                    <span className="text-xs font-bold text-blue-100 uppercase tracking-wide mr-1">
+                        VISTA: <span className="text-white">{currentRole.label}</span>
+                    </span>
+                    <select 
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        value={role}
+                        onChange={(e) => router.push(`/dashboard?role=${e.target.value}`)}
+                    >
+                        <option className="text-black bg-white" value="superadmin">Super Admin</option>
+                        <option className="text-black bg-white" value="admin">Administrador</option>
+                        <option className="text-black bg-white" value="coordinador">Coordinador</option>
+                        <option className="text-black bg-white" value="operativo">Operativo</option>
+                        <option className="text-black bg-white" value="client">Cliente</option>
+                    </select>
+                    <ChevronDown size={14} className="text-blue-300"/>
+                </div>
+            </div>
 
-          <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-            <ClipboardList className="text-emerald-700 mb-4" size={32} />
-            <h3 className="text-xl font-bold mb-2 text-slate-800">Solicitar Servicio</h3>
-            <p className="text-slate-500 mb-6 text-sm">Levante una necesidad o requerimiento técnico inmediato.</p>
-            <Link href="/solicitud" className="block text-center bg-emerald-700 text-white py-2 rounded-lg font-semibold hover:bg-emerald-800 transition-colors">
-              Crear Ticket
-            </Link>
+            <div className="h-8 w-px bg-white/10 hidden md:block"></div>
+
+            <div className="flex items-center gap-3">
+                <div className={`h-10 w-10 ${currentRole.bg} rounded-full flex items-center justify-center font-black text-xs shadow-lg shadow-black/20 ring-2 ring-[#0a1e3f] ring-offset-2 ring-offset-white/10`}>
+                    {currentRole.short}
+                </div>
+                <button 
+                  onClick={() => {
+                    localStorage.removeItem('kiosco_user');
+                    router.push('/login');
+                  }}
+                  className="h-10 w-10 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-full flex items-center justify-center transition-all border border-transparent hover:border-red-500/30"
+                >
+                    <LogOut size={18} />
+                </button>
+            </div>
           </div>
-
-          <div className="bg-slate-900 p-8 rounded-xl shadow-lg text-white">
-            <LogIn className="text-blue-400 mb-4" size={32} />
-            <h3 className="text-xl font-bold mb-2">Acceso Staff</h3>
-            <p className="text-slate-400 mb-6 text-sm">Panel para Administradores, Coordinadores y Operativos.</p>
-            <Link href="/login" className="block text-center bg-white text-slate-900 py-2 rounded-lg font-semibold hover:bg-slate-100 transition-colors">
-              Entrar al Panel
-            </Link>
-          </div>
-
         </div>
-      </section>
+      </header>
+
+      {/* CONTENIDO PRINCIPAL */}
+      <div className="w-full">
+        {(role === 'superadmin' || role === 'admin') && (
+            <ManagementView role={role as 'superadmin' | 'admin'} />
+        )}
+        {role === 'coordinador' && <CoordinatorView />}
+        {role === 'operativo' && <OperativeView />}
+        {role === 'client' && <ClientView />}
+      </div>
     </main>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center text-[#0a1e3f] font-bold">
+            Cargando sistema...
+        </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }
