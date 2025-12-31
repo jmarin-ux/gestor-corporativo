@@ -8,8 +8,8 @@ import {
   Zap, Users, Building2, Search, Star, UserCog, HardHat, History, 
   MapPin, User, Monitor, Briefcase, RefreshCw, Download, Edit, 
   Eye, EyeOff, CheckCircle2, XCircle, Send, Plus, MonitorPlay,
-  // --- CORRECCIÓN AQUÍ: Agregué 'Image as ImageIcon' y 'Save' ---
-  Image as ImageIcon, Save
+  // CORRECCIÓN DE IMPORTACIONES
+  Image as ImageIcon, Save 
 } from 'lucide-react';
 import OperativeAccessModal from '@/components/auth/OperativeAccessModal';
 
@@ -92,31 +92,24 @@ export default function SuperAdminView() {
     return { staff: staffList, clients: clientList, requests: requestList, ticketsFiltered: ticketList, coordinators: coordinatorsList, operatives: operativesList, kioskMasters: kioskList, stats: { rating } };
   }, [data, filters]);
 
-  // --- PREPARAR NUEVO USUARIO (Se pasa al componente hijo) ---
   const handlePrepareCreate = (targetRole: string) => {
     let emptyUser: any = { id: 'new', type: 'staff', full_name: '', email: '', phone: '', password: '' };
-    
     if (targetRole === 'client') emptyUser = { ...emptyUser, type: 'client', role: 'client', company: '', position: '' };
     else if (targetRole === 'kiosk_master') emptyUser = { ...emptyUser, role: 'kiosk_master', full_name: 'Nueva Sucursal', email: '@cmw.com.mx' };
     else if (targetRole === 'operativo') emptyUser = { ...emptyUser, role: 'operativo', pin: '', linked_kiosk_email: '' };
     else emptyUser = { ...emptyUser, role: 'admin' };
-    
-    setEditingUser(emptyUser); // Abrimos el modal
+    setEditingUser(emptyUser);
   };
 
-  // --- LÓGICA DE GUARDADO DE USUARIO (Se pasa al Modal) ---
   const handleSaveUser = async (action: 'update' | 'new', payload: any) => {
     if (processing) return; 
     setProcessing(true);
     try {
         const table = payload.type === 'client' ? 'clients' : 'profiles';
         const updateData: any = { full_name: payload.full_name };
-
-        // 1. Roles con email real
         if (payload.role !== 'operativo' && payload.type !== 'client') {
              updateData.email = payload.email; updateData.role = payload.role;
         }
-        // 2. Operativos (Vínculo Kiosco + Email interno)
         if (payload.role === 'operativo') {
              updateData.role = 'operativo'; updateData.pin = payload.pin;
              updateData.linked_kiosk_email = payload.linked_kiosk_email; 
@@ -126,23 +119,19 @@ export default function SuperAdminView() {
                  updateData.email = `op.${cleanName}.${uniqueSuffix}@internal.cmw`;
              }
         }
-        // 3. Clientes
         if (payload.type === 'client') {
             updateData.email = payload.email; updateData.organization = payload.company; 
             updateData.position = payload.position; updateData.phone = payload.phone;
         }
         if (payload.password) updateData.password = payload.password;
-
         if (payload.id === 'new') { await supabase.from(table).insert([updateData]); } 
         else { await supabase.from(table).update(updateData).eq('id', payload.id); }
-
         setEditingUser(null);
         await fetchData();
         alert("✅ Guardado correctamente");
     } catch (e: any) { alert("Error: " + e.message); } finally { setProcessing(false); }
   };
 
-  // --- LÓGICA DE CLIENTES (Aprobar/Rechazar) ---
   const handleClientAction = async (action: 'approve' | 'reject', payload: any) => {
       if (processing) return; setProcessing(true);
       try {
@@ -154,7 +143,6 @@ export default function SuperAdminView() {
       } catch(e:any) { alert(e.message); } finally { setProcessing(false); }
   };
 
-  // --- LÓGICA DE TICKETS ---
   const openTicketDetails = (ticket: any) => {
     setTempAssignment({ status: ticket.status, coord: ticket.coordinator_id || '', oper: ticket.operative_id || '' });
     setNewComment(""); setModals({ ...modals, details: ticket });
@@ -162,23 +150,51 @@ export default function SuperAdminView() {
 
   const handleSaveChanges = async () => { 
     if(!modals.details) return; setProcessing(true);
-    try { const changes = []; if(tempAssignment.status !== modals.details.status) changes.push(`Estatus: ${modals.details.status} ➝ ${tempAssignment.status}`); if(tempAssignment.coord != (modals.details.coordinator_id || '')) changes.push(`Coordinador actualizado`); if(tempAssignment.oper != (modals.details.operative_id || '')) changes.push(`Operativo actualizado`); if(changes.length === 0) { alert("No hay cambios."); setProcessing(false); return; } const newLog = { date: new Date().toISOString(), changer: currentUserName, role: currentUserRole, type: 'system', action: changes.join(" | ") }; const currentLogs = modals.details.logs || []; const updatedLogs = [newLog, ...currentLogs]; const { error } = await supabase.from('tickets').update({ status: tempAssignment.status, coordinator_id: tempAssignment.coord || null, operative_id: tempAssignment.oper || null, logs: updatedLogs }).eq('id', modals.details.id); if(error) throw error; await fetchData(); setModals(prev => ({ ...prev, details: { ...prev.details, status: tempAssignment.status, logs: updatedLogs, coordinator_id: tempAssignment.coord, operative_id: tempAssignment.oper } })); alert("✅ Orden actualizada"); } catch (e: any) { alert(e.message); } finally { setProcessing(false); }
+    try { 
+        const changes = []; 
+        if(tempAssignment.status !== modals.details.status) changes.push(`Estatus: ${modals.details.status} ➝ ${tempAssignment.status}`); 
+        if(tempAssignment.coord != (modals.details.coordinator_id || '')) changes.push(`Coordinador actualizado`); 
+        if(tempAssignment.oper != (modals.details.operative_id || '')) changes.push(`Operativo actualizado`); 
+        if(changes.length === 0) { alert("No hay cambios."); setProcessing(false); return; } 
+        const newLog = { date: new Date().toISOString(), changer: currentUserName, role: currentUserRole, type: 'system', action: changes.join(" | ") }; 
+        const currentLogs = modals.details.logs || []; 
+        const updatedLogs = [newLog, ...currentLogs]; 
+        const { error } = await supabase.from('tickets').update({ status: tempAssignment.status, coordinator_id: tempAssignment.coord || null, operative_id: tempAssignment.oper || null, logs: updatedLogs }).eq('id', modals.details.id); 
+        if(error) throw error; 
+        await fetchData(); 
+        setModals(prev => ({ ...prev, details: { ...prev.details, status: tempAssignment.status, logs: updatedLogs, coordinator_id: tempAssignment.coord, operative_id: tempAssignment.oper } })); 
+        alert("✅ Orden actualizada"); 
+    } catch (e: any) { alert(e.message); } finally { setProcessing(false); }
   };
 
   const handleAddComment = async () => { 
     if(!newComment.trim() || !modals.details) return; setProcessing(true);
-    try { const commentLog = { date: new Date().toISOString(), changer: currentUserName, role: currentUserRole, type: 'comment', action: newComment }; const currentLogs = modals.details.logs || []; const updatedLogs = [commentLog, ...currentLogs]; const { error } = await supabase.from('tickets').update({ logs: updatedLogs }).eq('id', modals.details.id); if (error) throw error; const updatedTicket = { ...modals.details, logs: updatedLogs }; setModals({ ...modals, details: updatedTicket }); setNewComment(""); const updatedTickets = data.tickets.map(t => t.id === modals.details.id ? updatedTicket : t); setData({ ...data, tickets: updatedTickets }); } catch(e: any) { alert(e.message); } finally { setProcessing(false); }
+    try { 
+        const commentLog = { date: new Date().toISOString(), changer: currentUserName, role: currentUserRole, type: 'comment', action: newComment }; 
+        const currentLogs = modals.details.logs || []; 
+        const updatedLogs = [commentLog, ...currentLogs]; 
+        const { error } = await supabase.from('tickets').update({ logs: updatedLogs }).eq('id', modals.details.id); 
+        if (error) throw error; 
+        const updatedTicket = { ...modals.details, logs: updatedLogs }; 
+        setModals({ ...modals, details: updatedTicket }); 
+        setNewComment(""); 
+        const updatedTickets = data.tickets.map(t => t.id === modals.details.id ? updatedTicket : t); 
+        setData({ ...data, tickets: updatedTickets }); 
+    } catch(e: any) { alert(e.message); } finally { setProcessing(false); }
   };
 
   const downloadCSV = () => { 
-    const headers = ["Empresa", "Contacto", "Email", "Tickets"]; const rows = clients.map(c => [`"${c.company}"`, c.full_name, c.email, data.tickets.filter(t=>t.client_email===c.email).length].join(",")); const link = document.createElement("a"); link.href = "data:text/csv;charset=utf-8," + encodeURI([headers.join(","), ...rows].join("\n")); link.download = "clientes.csv"; link.click();
+    const headers = ["Empresa", "Contacto", "Email", "Tickets"]; 
+    const rows = clients.map(c => [`"${c.company}"`, c.full_name, c.email, data.tickets.filter(t=>t.client_email===c.email).length].join(",")); 
+    const link = document.createElement("a"); 
+    link.href = "data:text/csv;charset=utf-8," + encodeURI([headers.join(","), ...rows].join("\n")); 
+    link.download = "clientes.csv"; link.click();
   };
 
   if (modals.sim) return <ClientMirrorView client={modals.sim} tickets={data.tickets} onExit={() => setModals({...modals, sim: null})} />;
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-10 font-sans text-slate-800 pb-24">
-      
       {/* HEADER HERO */}
       <div className="bg-[#0a1e3f] p-8 md:p-10 rounded-[2.5rem] md:rounded-[3rem] text-white shadow-2xl mb-6 md:mb-8 flex flex-col md:flex-row justify-between items-start md:items-center relative overflow-hidden gap-4">
         <div className="relative z-10"><h1 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">¡Hola, {currentUserName.split(' ')[0]}! 👑</h1><p className="text-blue-200 text-xs md:text-sm font-medium mt-1">Sistema 100% operativo.</p></div>
@@ -199,7 +215,6 @@ export default function SuperAdminView() {
       {/* VISTA OPERACIONES */}
       {tab === 'ops' && (
         <div className="space-y-6 animate-in fade-in">
-          {/* Filtros */}
           <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center bg-white p-4 rounded-[2rem] shadow-sm border border-slate-100">
             <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
@@ -207,7 +222,6 @@ export default function SuperAdminView() {
             </div>
             <select className="bg-slate-50 rounded-full px-4 py-3 text-[10px] font-black uppercase outline-none cursor-pointer" value={filters.month} onChange={e => setFilters({...filters, month: e.target.value})}><option value="todos">Mes</option>{MONTHS.map(m=><option key={m.val} value={m.val}>{m.label}</option>)}</select>
           </div>
-          {/* Tabla */}
           <div className="bg-white rounded-[2.5rem] overflow-hidden shadow-xl border border-slate-100">
             <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs whitespace-nowrap">
@@ -233,14 +247,9 @@ export default function SuperAdminView() {
         </div>
       )}
 
-      {/* VISTA STAFF (COMPONENTE IMPORTADO) */}
+      {/* VISTA STAFF */}
       {tab === 'staff' && (
-        <StaffTab 
-            staffList={staff} 
-            currentUserRole={currentUserRole} 
-            onEdit={setEditingUser} 
-            onCreate={handlePrepareCreate}
-        />
+        <StaffTab staffList={staff} currentUserRole={currentUserRole} onEdit={setEditingUser} onCreate={handlePrepareCreate} />
       )}
 
       {/* VISTA CLIENTES */}
@@ -259,8 +268,6 @@ export default function SuperAdminView() {
                     {clientSubTab === 'active' && <button onClick={downloadCSV} className="p-2.5 bg-emerald-50 text-emerald-600 rounded-full hover:bg-emerald-100" title="Exportar CSV"><Download size={14}/></button>}
                 </div>
             </div>
-            
-            {/* TABLA CLIENTES */}
             {clientSubTab === 'active' && (
                 <div className="bg-white rounded-[2.5rem] overflow-hidden shadow-xl border border-slate-100">
                     <div className="overflow-x-auto">
@@ -281,8 +288,6 @@ export default function SuperAdminView() {
                     </div>
                 </div>
             )}
-
-            {/* SOLICITUDES */}
             {clientSubTab === 'requests' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {requests.length === 0 && <div className="p-10 text-center text-slate-400 font-bold uppercase text-xs col-span-2">Sin solicitudes pendientes</div>}
@@ -305,24 +310,14 @@ export default function SuperAdminView() {
       )}
 
       {/* MODALES */}
-      {/* 1. EDICIÓN / CREACIÓN (COMPONENTE IMPORTADO) */}
       {editingUser && (
-        <EditUserModal 
-            user={editingUser} 
-            kioskMasters={kioskMasters} 
-            currentUserRole={currentUserRole}
-            onClose={() => setEditingUser(null)} 
-            onSave={handleSaveUser}
-            isProcessing={processing}
-        />
+        <EditUserModal user={editingUser} kioskMasters={kioskMasters} currentUserRole={currentUserRole} onClose={() => setEditingUser(null)} onSave={handleSaveUser} isProcessing={processing} />
       )}
 
-      {/* 2. DETALLES DE TICKET (MODAL ORIGINAL INTEGRADO AQUÍ PARA SIMPLICIDAD) */}
       {modals.details && (
         <div className="fixed inset-0 z-[150] flex justify-center items-end md:items-center animate-in fade-in duration-200">
             <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={() => setModals({...modals, details:null})}></div>
             <div className="relative w-full md:max-w-6xl h-[95vh] md:h-[85vh] bg-white rounded-t-[2.5rem] md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
-                {/* Header Ticket */}
                 <div className="bg-[#0a1e3f] px-6 py-5 md:px-8 md:py-6 text-white flex justify-between items-center flex-shrink-0">
                     <div>
                         <div className="flex items-center gap-3 mb-1"><span className="text-[10px] font-black bg-white/10 px-2 py-0.5 rounded text-blue-100 border border-white/10 tracking-widest">{modals.details.codigo_servicio}</span><span className="text-[10px] opacity-60 font-medium">{new Date(modals.details.created_at).toLocaleDateString()}</span></div>
@@ -330,7 +325,6 @@ export default function SuperAdminView() {
                     </div>
                     <button onClick={() => setModals({...modals, details:null})} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><XCircle size={24}/></button>
                 </div>
-                {/* Cuerpo Ticket */}
                 <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
                     <div className="flex-1 overflow-y-auto bg-slate-50 p-6 md:p-8 border-r border-slate-200">
                         <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2"><Zap size={14}/> Expediente</h3>
@@ -372,7 +366,6 @@ export default function SuperAdminView() {
             </div>
         </div>
       )}
-
       {showKioskModal && <OperativeAccessModal onClose={() => setShowKioskModal(false)} />}
     </div>
   );
