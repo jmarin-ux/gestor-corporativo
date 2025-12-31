@@ -1,93 +1,98 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
-import { UserPlus, Zap, Lock, ChevronRight, Activity, Cpu } from 'lucide-react';
+import { UserPlus, Zap, Lock, ChevronRight, Activity, Cpu, HardHat } from 'lucide-react';
+// Importamos tu nuevo componente
+import OperativeAccessModal from '@/components/auth/OperativeAccessModal';
 
-export default function HomePage() {
+export default function CentralAccessPanel() {
+  const [showPinPad, setShowPinPad] = useState(false);
+
   return (
-    <main className="min-h-screen bg-[#020617] text-white font-sans selection:bg-cyan-500/30">
+    <main className="min-h-screen bg-[#020617] text-white relative font-sans selection:bg-blue-500/30">
       
-      {/* Navbar: Simple y limpio */}
-      <nav className="border-b border-white/5 bg-black/40 backdrop-blur-md sticky top-0 z-50 px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
-            <Cpu size={20} className="text-cyan-400" />
-          </div>
-          <span className="text-lg font-black tracking-tighter uppercase italic">
-            CORP<span className="text-cyan-400 font-light">OPS</span>
-          </span>
+      {/* HEADER */}
+      <header className="flex justify-between items-center p-6 md:px-12 border-b border-white/5">
+        <div className="flex items-center gap-2">
+           <div className="w-8 h-8 bg-blue-600/20 text-blue-400 rounded-lg flex items-center justify-center border border-blue-500/20">
+             <Cpu size={18} />
+           </div>
+           <span className="font-black tracking-tight text-lg">CORP<span className="text-blue-500">OPS</span></span>
         </div>
-        
-        {/* Indicador de estado */}
-        <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
-          <Activity size={12} className="text-emerald-400 animate-pulse" />
-          <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
-            Portal Activo
-          </span>
+        <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest">
+            <Activity size={12} /> Portal Activo
         </div>
-      </nav>
+      </header>
 
-      {/* Contenido Principal */}
-      <section className="max-w-7xl mx-auto px-6 pt-20 pb-20 text-center">
+      {/* CONTENIDO PRINCIPAL */}
+      <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 py-12">
         
-        <h1 className="text-5xl md:text-7xl font-black mb-6 tracking-tighter leading-tight">
-          PANEL DE <br /> 
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-600">
-            INGRESO CENTRAL
-          </span>
-        </h1>
-        
-        <p className="text-slate-400 text-lg mb-16 max-w-2xl mx-auto">
-          Seleccione la operación que desea realizar para continuar.
-        </p>
-
-        {/* GRID DE 3 TARJETAS */}
-        <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto text-left">
-          
-          {/* 1. TARJETA: REGISTRO DE CLIENTES */}
-          <div className="group bg-white/[0.03] border border-white/10 p-8 rounded-3xl hover:border-cyan-500/50 hover:bg-white/[0.05] transition-all duration-300">
-            <div className="bg-cyan-500/10 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <UserPlus className="text-cyan-400" size={28} />
-            </div>
-            <h3 className="text-xl font-bold mb-3 text-white">Nuevo Cliente</h3>
-            <p className="text-slate-500 text-sm mb-8 h-10">
-              Registro inicial para darse de alta en nuestra red operativa.
-            </p>
-            <Link href="/registro" className="flex items-center gap-2 text-cyan-400 font-bold text-xs uppercase tracking-widest group-hover:gap-4 transition-all">
-              Crear Cuenta <ChevronRight size={16} />
-            </Link>
-          </div>
-
-          {/* 2. TARJETA: SOLICITAR SERVICIOS (Con Modo Ticket) */}
-          <div className="group bg-white/[0.03] border border-white/10 p-8 rounded-3xl hover:border-purple-500/50 hover:bg-white/[0.05] transition-all duration-300">
-            <div className="bg-purple-500/10 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <Zap className="text-purple-400" size={28} />
-            </div>
-            <h3 className="text-xl font-bold mb-3 text-white">Solicitar Servicio</h3>
-            <p className="text-slate-500 text-sm mb-8 h-10">
-              Levantar un requerimiento o ticket técnico inmediato.
-            </p>
-            {/* CORRECCIÓN: Agregamos ?mode=ticket */}
-            <Link href="/login?mode=ticket" className="flex items-center gap-2 text-purple-400 font-bold text-xs uppercase tracking-widest group-hover:gap-4 transition-all">
-              Generar Ticket <ChevronRight size={16} />
-            </Link>
-          </div>
-
-          {/* 3. TARJETA: CONSOLA STAFF (Con Modo Admin) */}
-          <div className="group bg-white/[0.03] border border-white/10 p-8 rounded-3xl hover:border-blue-500/50 hover:bg-white/[0.05] transition-all duration-300">
-            <div className="bg-blue-500/10 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <Lock className="text-blue-500" size={28} />
-            </div>
-            <h3 className="text-xl font-bold mb-3 text-white">Consola Staff</h3>
-            <p className="text-slate-500 text-sm mb-8 h-10">
-              Acceso exclusivo para gestión y administración del sistema.
-            </p>
-            {/* CORRECCIÓN: Agregamos ?mode=admin */}
-            <Link href="/login?mode=admin" className="flex items-center gap-2 text-blue-500 font-bold text-xs uppercase tracking-widest group-hover:gap-4 transition-all">
-              Entrar al Panel <ChevronRight size={16} />
-            </Link>
-          </div>
-
+        <div className="text-center mb-16 space-y-4 max-w-2xl">
+            <h1 className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-none">
+                Panel de <br/>
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600">Ingreso Central</span>
+            </h1>
+            <p className="text-slate-400 font-medium text-lg">Seleccione la operación que desea realizar para continuar.</p>
         </div>
-      </section>
+
+        {/* GRID DE OPCIONES */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
+            
+            {/* 1. Nuevo Cliente */}
+            <div className="group bg-slate-900/50 hover:bg-slate-900 border border-white/5 hover:border-cyan-500/30 rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-14 h-14 bg-cyan-950/30 text-cyan-400 rounded-2xl flex items-center justify-center mb-6 border border-cyan-500/20 group-hover:scale-110 transition-transform">
+                    <UserPlus size={28} />
+                </div>
+                <h3 className="text-xl font-bold mb-2 text-white">Nuevo Cliente</h3>
+                <p className="text-slate-400 text-sm mb-8 leading-relaxed">Registro inicial para darse de alta en nuestra red operativa.</p>
+                <Link href="/register" className="inline-flex items-center gap-2 text-cyan-400 font-black text-xs uppercase tracking-widest group-hover:gap-3 transition-all">
+                    Crear Cuenta <ChevronRight size={14}/>
+                </Link>
+            </div>
+
+            {/* 2. Solicitar Servicio */}
+            <div className="group bg-slate-900/50 hover:bg-slate-900 border border-white/5 hover:border-purple-500/30 rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-14 h-14 bg-purple-950/30 text-purple-400 rounded-2xl flex items-center justify-center mb-6 border border-purple-500/20 group-hover:scale-110 transition-transform">
+                    <Zap size={28} />
+                </div>
+                <h3 className="text-xl font-bold mb-2 text-white">Solicitar Servicio</h3>
+                <p className="text-slate-400 text-sm mb-8 leading-relaxed">Levantar un requerimiento o ticket técnico inmediato.</p>
+                <Link href="/tickets/new" className="inline-flex items-center gap-2 text-purple-400 font-black text-xs uppercase tracking-widest group-hover:gap-3 transition-all">
+                    Generar Ticket <ChevronRight size={14}/>
+                </Link>
+            </div>
+
+            {/* 3. Consola Staff (Admin) */}
+            <div className="group bg-slate-900/50 hover:bg-slate-900 border border-white/5 hover:border-blue-500/30 rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-14 h-14 bg-blue-950/30 text-blue-400 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/20 group-hover:scale-110 transition-transform">
+                    <Lock size={28} />
+                </div>
+                <h3 className="text-xl font-bold mb-2 text-white">Consola Staff</h3>
+                <p className="text-slate-400 text-sm mb-8 leading-relaxed">Acceso exclusivo para gestión y administración del sistema.</p>
+                <Link href="/login" className="inline-flex items-center gap-2 text-blue-400 font-black text-xs uppercase tracking-widest group-hover:gap-3 transition-all">
+                    Entrar al Panel <ChevronRight size={14}/>
+                </Link>
+            </div>
+        </div>
+
+        {/* BOTÓN DISCRETO OPERATIVO */}
+        <div className="mt-16 opacity-30 hover:opacity-100 transition-opacity duration-300">
+            <button 
+                onClick={() => setShowPinPad(true)}
+                className="flex items-center gap-2 text-slate-500 hover:text-white px-4 py-2 rounded-full hover:bg-white/5 transition-colors"
+            >
+                <HardHat size={16} />
+                <span className="text-xs font-bold uppercase tracking-widest">Acceso Operativo</span>
+            </button>
+        </div>
+      </div>
+
+      {/* --- AQUÍ RENDERIZAMOS EL MODAL SI ESTÁ ACTIVO --- */}
+      {showPinPad && (
+        <OperativeAccessModal onClose={() => setShowPinPad(false)} />
+      )}
+
     </main>
   );
 }
