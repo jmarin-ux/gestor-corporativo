@@ -1,15 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-// CORRECCIÓN: Dejamos un solo import y ajustamos la ruta relativa correcta
-import { supabase } from '../../../lib/supabase'; // Asumiendo que está en components/dashboard/super-admin/
+import { supabase } from '@/lib/supabase-browser'; 
 import { 
   TrendingUp, MapPin, MoreHorizontal, UserCheck, HardHat, 
   RefreshCw, Download, Loader2
 } from 'lucide-react';
-import ServiceDetailModal from './ServiceDetailModal'; 
+// Asegúrate de que esta ruta sea correcta según tu estructura
+import ServiceDetailModal from '@/components/dashboard/ServiceDetailModal'; 
 
-export default function OperationsSection({ tickets, profiles, clients, refresh }: any) {
+// 👇 PARCHE PARA VERCEL: Interface flexible
+interface OperationsSectionProps {
+  tickets: any[];
+  profiles: any[];
+  clients: any[];
+  refresh: () => void;
+  [key: string]: any;
+}
+
+export default function OperationsSection({ tickets, profiles, clients, refresh }: OperationsSectionProps) {
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [processingId, setProcessingId] = useState<number | null>(null);
 
@@ -30,7 +39,6 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
     setProcessingId(id);
     const valToSend = value === "" ? null : value;
     
-    // CORRECCIÓN: Usamos 'coordinator_id' (Inglés) que es donde está el dato '17' en tu CSV
     const targetField = field === 'coordinador_id' ? 'coordinator_id' : field;
     
     const updates: any = { [targetField]: valToSend };
@@ -52,7 +60,6 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
 
   const handleExport = () => {
     const rows = tickets.map((t: any) => {
-        // Cruce de email para obtener nombre real
         const clientMatch = clients?.find((c: any) => c.email === t.client_email);
         const realOrg = clientMatch?.organization || t.company || 'GEN';
         return [
@@ -60,7 +67,7 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
             t.location, t.service_type, t.quote_amount || 0
         ].join(",");
     });
-    // ... lógica de descarga simple ...
+    
     const csvContent = "Folio,Estado,Cliente,Email,Sitio,Servicio,Monto\n" + rows.join("\n");
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv' }));
@@ -70,14 +77,20 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
+        
+        {/* HEADER DE ESTADÍSTICAS */}
         <div className="bg-[#0a1e3f] rounded-[2.5rem] p-8 text-white shadow-2xl flex justify-between items-center">
             <div>
                 <h3 className="text-5xl font-black tracking-tighter">{efficiency}%</h3>
                 <p className="text-blue-300 text-[10px] font-bold mt-2 uppercase">Eficiencia Operativa</p>
             </div>
-            <button onClick={refresh} className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl transition-all"><RefreshCw size={24}/></button>
+            <div className="flex gap-2">
+                <button onClick={handleExport} className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl transition-all" title="Descargar"><Download size={24}/></button>
+                <button onClick={refresh} className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl transition-all" title="Refrescar"><RefreshCw size={24}/></button>
+            </div>
         </div>
 
+        {/* TABLA PRINCIPAL */}
         <div className="bg-white rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-100">
             <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm whitespace-nowrap">
@@ -107,18 +120,16 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
                                     <td className="px-6 py-5 font-black text-[#0a1e3f]">{t.codigo_servicio}</td>
                                     <td className="px-6 py-5 font-black text-slate-700 uppercase tracking-tighter">{clientOrg}</td>
                                     
-                                    {/* SELECTOR: Usa 'coordinator_id' (inglés) para visualizar */}
                                     <td className="px-6 py-5">
                                         <div className="relative">
                                             {isProcessing && <div className="absolute inset-0 bg-white/50 z-20 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={12}/></div>}
                                             <select 
                                                 className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500/20 w-full cursor-pointer truncate"
-                                                // Leemos coordinator_id (inglés) que tiene el 17
                                                 value={t.coordinator_id || t.coordinador_id || ''} 
                                                 onChange={(e) => handleQuickUpdate(t.id, 'coordinador_id', e.target.value)}
                                             >
                                                 <option value="">-- Sin asignar --</option>
-                                                {profiles?.filter((p:any) => ['coordinador','admin'].includes(p.role)).map((p:any) => (
+                                                {profiles?.filter((p:any) => ['coordinador','admin','superadmin'].includes((p.role || '').toLowerCase())).map((p:any) => (
                                                     <option key={p.id} value={p.id}>{p.full_name}</option>
                                                 ))}
                                             </select>
@@ -149,7 +160,17 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
                 </table>
             </div>
         </div>
-        {selectedTicket && <ServiceDetailModal ticket={selectedTicket} currentUser={{role:'superadmin'}} close={() => {setSelectedTicket(null); refresh();}} />}
+
+        {/* ✅ MODAL CORREGIDO: isOpen + onClose */}
+        {selectedTicket && (
+            <ServiceDetailModal 
+                isOpen={true} // OBLIGATORIO
+                ticket={selectedTicket} 
+                currentUser={{role:'superadmin'}} 
+                onClose={() => setSelectedTicket(null)} // Nombre correcto: onClose
+                onUpdate={refresh} 
+            />
+        )}
     </div>
   );
 }

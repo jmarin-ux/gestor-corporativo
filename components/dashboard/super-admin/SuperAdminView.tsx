@@ -1,47 +1,37 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Zap, Users, Building2, Search, RefreshCw,
-  DollarSign, Edit3, Plus, Check, X, UserPlus,
-  Calendar as CalendarIcon, Database, LayoutGrid
+  DollarSign, UserPlus, Calendar as CalendarIcon, 
+  Database, LayoutGrid, Check, X
 } from 'lucide-react';
 
 // --- IMPORTACIONES DE COMPONENTES ---
 import ServiceTable from '@/components/dashboard/ServiceTable';
-import StaffTab from './StaffTab';
+import StaffSection from './StaffSection';
+import ClientsSection from './ClientsSection';
 import AssetsTab from '../AssetsTab';
-import ClientMirrorView from '../ClientMirrorView';
+import PlannerView from '@/components/dashboard/PlannerView';
 import ServiceDetailModal from '@/components/dashboard/ServiceDetailModal';
-import Planner from '@/components/dashboard/Planner';
-import GlobalAdminModal from './GlobalAdminModal';
-import EditAssetModal from './EditAssetModal';
 import Header from '@/components/ui/Header';
 
 interface SuperAdminViewProps {
   currentUser: any;
   onRefresh?: () => void;
+  // Permitimos props extra para evitar errores de TypeScript estrictos
   [key: string]: any;
 }
 
 export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
-  // ✅ Permisos
-  const roleLower = (currentUser?.role || '').toString().toLowerCase().trim();
-  const isFullAdmin = ['superadmin', 'super admin', 'admin'].includes(roleLower);
-
-  // --- ESTADOS DE DATOS ---
+  
+  // --- ESTADOS DE DATOS GLOBALES ---
   const [data, setData] = useState<{
     tickets: any[],
-    users: any[],
-    rawClients: any[],
-    rawAssets: any[],
     requests: any[]
   }>({
     tickets: [],
-    users: [],
-    rawClients: [],
-    rawAssets: [],
     requests: []
   });
 
@@ -51,45 +41,21 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
 
   const [filters, setFilters] = useState({
     search: '',
-    month: 'todos',
-    year: new Date().getFullYear().toString(),
-    roleFilter: 'todos'
   });
 
-  const [editingUser, setEditingUser] = useState<any>(null);
-  const [editingAsset, setEditingAsset] = useState<any>(null);
-  const [simulatingClient, setSimulatingClient] = useState<any>(null);
-  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
-
-  // --- CARGA MAESTRA ---
+  // --- CARGA DE DATOS (Solo Operaciones y Solicitudes) ---
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // ✅ 2A) CARGA CON FILTRADO POR WHITELIST
-      // Esto asegura que solo roles administrativos, operativos y kioscos entren en Profiles.
-      const [t, p, c, a, r] = await Promise.all([
+      const [t, r] = await Promise.all([
+        // 1. Tickets
         supabase
           .from('tickets')
           .select('*')
           .neq('status', 'Cancelado')
           .order('created_at', { ascending: false }),
 
-        // ✅ REEMPLAZO RECOMENDADO: Solo traer roles que pertenecen legalmente al Staff o Kioscos
-        supabase
-          .from('profiles')
-          .select('*')
-          .in('role', ['superadmin', 'admin', 'coordinador', 'operativo', 'tecnico', 'kiosco']),
-
-        supabase
-          .from('clients')
-          .select('*')
-          .order('organization', { ascending: true }),
-
-        supabase
-          .from('assets')
-          .select('*')
-          .order('nombre_activo', { ascending: true }),
-
+        // 2. Solicitudes de Acceso
         supabase
           .from('access_requests')
           .select('*')
@@ -97,26 +63,13 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
           .order('created_at', { ascending: false }),
       ]);
 
-      // 🔍 LOGS DE DEPURACIÓN TEMPORALES (Puedes eliminarlos después de verificar)
-      console.log('PROFILES COUNT:', p.data?.length);
-      console.log('HAS KIOSCO:', (p.data || []).some(x => (x.role || '').toLowerCase() === 'kiosco'));
-      console.log('KIOSCO ROW:', (p.data || []).find(x => (x.role || '').toLowerCase() === 'kiosco'));
-
-      const formattedClients = (c.data || []).map((x: any) => ({
-        ...x, type: 'client', role: 'client', company: x.organization
-      }));
-
-      const formattedStaff = (p.data || []).map((x: any) => ({ ...x, type: 'staff' }));
-
       setData({
         tickets: t.data || [],
-        users: [...formattedStaff, ...formattedClients],
-        rawClients: c.data || [],
-        rawAssets: a.data || [],
         requests: r.data || []
       });
+
     } catch (e) {
-      console.error("Error crítico de sincronización:", e);
+      console.error("Error al cargar datos:", e);
     } finally {
       setLoading(false);
     }
@@ -126,7 +79,7 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
     fetchData();
   }, [fetchData]);
 
-  // --- MANEJADORES DE ACCIÓN ---
+  // --- MANEJADORES DE SOLICITUDES ---
   const handleApproveClient = async (request: any) => {
     if (!confirm(`¿Confirmas la aprobación para ${request.full_name}?`)) return;
     setLoading(true);
@@ -162,59 +115,10 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
     fetchData();
   };
 
-  const handleSaveAsset = async (action: string, assetData: any) => {
-    setLoading(true);
-    try {
-      if (action === 'create') {
-        const finalId = assetData.identificador || `W${Math.floor(1000 + Math.random() * 9000)}`;
-        const payload = { ...assetData, identificador: finalId };
-        if (payload.id === 'new') delete payload.id;
-        const { error } = await supabase.from('assets').insert([payload]);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('assets').update(assetData).eq('id', assetData.id);
-        if (error) throw error;
-      }
-      await fetchData();
-      setEditingAsset(null);
-    } catch (e: any) {
-      alert("❌ Error: " + e.message);
-    } finally {
-      setLoading(false);
-    }
+  // --- CÁLCULOS RAPIDOS (Solo para el banner) ---
+  const stats = {
+      revenue: data.tickets.reduce((acc: number, t: any) => acc + (Number(t.quote_amount || 0) * 1.16), 0)
   };
-
-  // --- FILTROS ---
-  const { staffFiltered, assetsFiltered, stats } = useMemo(() => {
-    const term = filters.search.toLowerCase();
-
-    const staff = data.users.filter((u: any) => {
-      const matchSearch = u.full_name?.toLowerCase().includes(term) || u.email?.toLowerCase().includes(term);
-      const matchRole = filters.roleFilter === 'todos' || u.role === filters.roleFilter;
-      return u.type === 'staff' && matchSearch && matchRole;
-    });
-
-    const assets = data.rawAssets.filter((a: any) => {
-      return a.nombre_activo?.toLowerCase().includes(term) ||
-        a.serie?.toLowerCase().includes(term) ||
-        a.cliente_nombre?.toLowerCase().includes(term) ||
-        a.identificador?.toLowerCase().includes(term);
-    });
-
-    const totalRevenue = data.tickets.reduce((acc: number, t: any) => acc + (Number(t.quote_amount || 0) * 1.16), 0);
-    const rated = data.tickets.filter((t: any) => (t.satisfaction_rating || 0) > 0);
-    const avg = rated.length ? (rated.reduce((a: number, b: any) => a + b.satisfaction_rating, 0) / rated.length).toFixed(1) : "0.0";
-
-    return {
-      staffFiltered: staff,
-      assetsFiltered: assets,
-      stats: { rating: avg, total: data.tickets.length, revenue: totalRevenue }
-    };
-  }, [data, filters]);
-
-  if (simulatingClient) {
-    return <ClientMirrorView client={simulatingClient} tickets={data.tickets} onExit={() => setSimulatingClient(null)} />;
-  }
 
   return (
     <>
@@ -226,7 +130,7 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
 
       <div className="space-y-6 pb-20 pt-4 md:pt-8 animate-in fade-in duration-500 text-left bg-slate-50/50 min-h-screen">
 
-        {/* Banner */}
+        {/* BANNER PRINCIPAL */}
         <div className="mx-4 md:mx-8">
           <div className="bg-[#0a1e3f] p-8 md:p-10 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-6">
             <div className="relative z-10">
@@ -259,7 +163,7 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
 
         <div className="px-4 md:px-8 space-y-6">
 
-          {/* Tabs */}
+          {/* MENÚ DE TABS */}
           <div className="sticky top-20 z-40 bg-white/80 backdrop-blur-md p-2 rounded-[2rem] shadow-sm border border-slate-100 w-full overflow-x-auto gap-2 flex items-center justify-start md:justify-center">
             {[
               { id: 'ops', icon: Zap, label: 'Operaciones' },
@@ -282,8 +186,8 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
             ))}
           </div>
 
-          {/* Search */}
-          {tab !== 'planner' && (
+          {/* BARRA DE BÚSQUEDA (Solo visible en Operaciones y Solicitudes) */}
+          {(tab === 'ops') && (
             <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-[2.5rem] shadow-sm border border-slate-100 items-center">
               <div className="relative flex-1 w-full">
                 <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
@@ -300,19 +204,23 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
             </div>
           )}
 
-          {/* Views */}
+          {/* VISTAS */}
           <div className="animate-in fade-in slide-in-from-top-2 duration-700 min-h-[500px]">
 
+            {/* 1. OPERACIONES */}
             {tab === 'ops' && (
               <ServiceTable
-                services={data.tickets}
-                staff={data.users}
+                services={data.tickets.filter(t => 
+                   JSON.stringify(t).toUpperCase().includes(filters.search)
+                )}
+                staff={[]} 
                 currentUser={currentUser}
                 onRefresh={fetchData}
                 onOpenDetails={setSelectedTicket}
               />
             )}
 
+            {/* 2. SOLICITUDES */}
             {tab === 'requests' && (
               <div className="grid grid-cols-1 gap-4">
                 {data.requests.length === 0 && (
@@ -345,125 +253,40 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
               </div>
             )}
 
-            {tab === 'planner' && <Planner currentUser={currentUser} onRefresh={fetchData} />}
-
-            {tab === 'staff' && (
-              <div className="space-y-4">
-                <div className="flex justify-end px-2">
-                  <button
-                    onClick={() => {
-                      setEditingUser({
-                        id: 'new',
-                        type: 'staff',
-                        full_name: '',
-                        email: '',
-                        role: 'operativo',
-                        status: 'active',
-                      });
-                      setIsStaffModalOpen(true);
-                    }}
-                    className="bg-[#00C897] text-[#0a1e3f] px-6 py-3 rounded-2xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg hover:shadow-emerald-500/20 transition-all"
-                  >
-                    <Plus size={16} /> Añadir Personal
-                  </button>
-                </div>
-
-                <StaffTab
-                  staffList={staffFiltered}
-                  currentUserRole={currentUser?.role}
-                  canEditSensitive={true}
-                  onEdit={(u: any) => {
-                    setEditingUser(u);
-                    setIsStaffModalOpen(true);
-                  }}
-                  hideSearch={true}
+            {/* 3. PLANIFICADOR */}
+            {tab === 'planner' && (
+                <PlannerView 
+                    currentUser={currentUser} 
+                    onBack={() => setTab('ops')}
                 />
-              </div>
             )}
 
+            {/* 4. PERSONAL */}
+            {tab === 'staff' && (
+                <StaffSection currentUser={currentUser} />
+            )}
+
+            {/* 5. ACTIVOS */}
             {tab === 'assets' && (
-              <AssetsTab
-                assets={assetsFiltered}
-                clients={data.rawClients}
-                currentUser={currentUser}
-                onEdit={setEditingAsset}
-                onCreate={() => setEditingAsset({ id: 'new' })}
-                onRefresh={fetchData}
-              />
+                <AssetsTab currentUser={currentUser} />
             )}
 
+            {/* 6. CLIENTES */}
             {tab === 'clients' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {data.rawClients.map((client: any) => (
-                  <div key={client.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-xl group transition-all relative overflow-hidden">
-                    <div className="flex justify-between items-start mb-6">
-                      <div className="flex items-center gap-4">
-                        <div className="p-4 bg-slate-900 rounded-2xl text-white"><Users size={24} /></div>
-                        <div>
-                          <h3 className="font-black uppercase text-slate-800 text-sm">{client.full_name || 'Sin Nombre'}</h3>
-                          <span className="text-[10px] font-black bg-[#00C897]/10 text-[#00C897] px-3 py-1 rounded-full uppercase mt-1 inline-block">
-                            {client.organization}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const coordinators = data.users.filter((u: any) => u.role === 'coordinador' || u.role === 'admin' || u.role === 'superadmin');
-                          setEditingUser({ ...client, type: 'client', role: 'client', availableCoordinators: coordinators });
-                          setIsStaffModalOpen(true);
-                        }}
-                        className="p-3 text-slate-300 hover:text-[#00C897] transition-colors bg-slate-50 rounded-xl"
-                      >
-                        <Edit3 size={18} />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => setSimulatingClient(client)}
-                      className="w-full bg-[#0a1e3f] text-white py-4 rounded-2xl text-[10px] font-black uppercase hover:bg-[#00C897] transition-all tracking-widest"
-                    >
-                      Ver como Cliente
-                    </button>
-                  </div>
-                ))}
-              </div>
+                <ClientsSection currentUser={currentUser} />
             )}
 
           </div>
         </div>
       </div>
 
-      {/* Modales */}
+      {/* MODAL DETALLES TICKET */}
       {selectedTicket && (
         <ServiceDetailModal
           isOpen={!!selectedTicket}
           ticket={selectedTicket}
           currentUser={currentUser}
           onClose={() => setSelectedTicket(null)}
-          onUpdate={fetchData}
-        />
-      )}
-
-      {isStaffModalOpen && (
-        <GlobalAdminModal
-          isOpen={isStaffModalOpen}
-          user={editingUser}
-          currentUser={currentUser}
-          canEditSensitiveData={isFullAdmin}
-          onClose={() => {
-            setIsStaffModalOpen(false);
-            setEditingUser(null);
-          }}
-          onUpdate={fetchData}
-        />
-      )}
-
-      {editingAsset && (
-        <EditAssetModal
-          isOpen={true}
-          asset={editingAsset}
-          clients={data.rawClients}
-          onClose={() => setEditingAsset(null)}
-          onSave={handleSaveAsset}
           onUpdate={fetchData}
         />
       )}
