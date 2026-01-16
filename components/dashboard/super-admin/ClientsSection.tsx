@@ -4,11 +4,18 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase-browser';
 import { Search, Building2, Mail, Edit3, UserCheck, AlertCircle, Eye } from 'lucide-react';
 import EditClientModal from './EditClientModal';
-// Asegúrate de haber movido la carpeta 'hooks' a la raíz del proyecto para que esto funcione:
 import { usePermissions } from '@/hooks/usePermissions'; 
 
-export default function ClientsSection({ currentUser }: { currentUser: any }) {
-  const [clients, setClients] = useState<any[]>([]);
+// 👇 EL PARCHE PARA VERCEL: 
+// Aceptamos las props viejas (clients, onRefresh) aunque no las usemos
+interface ClientsSectionProps {
+  currentUser: any;
+  clients?: any[];      // 👈 Aceptamos esto para calmar a TypeScript
+  onRefresh?: any;      // 👈 Aceptamos esto para calmar a TypeScript
+}
+
+export default function ClientsSection({ currentUser, ...ignoredProps }: ClientsSectionProps) {
+  const [clientsList, setClientsList] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,7 +26,6 @@ export default function ClientsSection({ currentUser }: { currentUser: any }) {
 
   // 🔒 SISTEMA DE PERMISOS DINÁMICO
   const { can } = usePermissions(currentUser);
-  // Preguntamos a la base de datos si este rol puede editar clientes
   const canEditClients = can('clients', 'edit'); 
 
   const fetchData = async () => {
@@ -36,7 +42,7 @@ export default function ClientsSection({ currentUser }: { currentUser: any }) {
       .from('profiles')
       .select('id, full_name, role');
 
-    setClients(clientsData || []);
+    setClientsList(clientsData || []);
     setStaffList(staffData || []);
     setLoading(false);
   };
@@ -46,13 +52,12 @@ export default function ClientsSection({ currentUser }: { currentUser: any }) {
   }, []);
 
   const handleEdit = (client: any) => {
-      // Doble seguridad: Si no tiene permiso según el hook, no abre.
       if (!canEditClients) return; 
       setSelectedClient(client);
       setIsModalOpen(true);
   };
 
-  const filteredClients = clients.filter(c => 
+  const filteredClients = clientsList.filter(c => 
     (c.organization || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.email || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -69,7 +74,7 @@ export default function ClientsSection({ currentUser }: { currentUser: any }) {
             </div>
             <div>
                 <h2 className="font-black text-slate-800 uppercase text-sm tracking-wide">Cartera de Clientes</h2>
-                <p className="text-[10px] font-bold text-slate-400 uppercase">{clients.length} Registrados</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase">{clientsList.length} Registrados</p>
             </div>
         </div>
         
@@ -151,7 +156,7 @@ export default function ClientsSection({ currentUser }: { currentUser: any }) {
         </div>
       </div>
 
-      {/* MODAL DE EDICIÓN (Solo se abre si tiene permiso) */}
+      {/* MODAL DE EDICIÓN */}
       {isModalOpen && selectedClient && canEditClients && (
           <EditClientModal
               isOpen={true}
