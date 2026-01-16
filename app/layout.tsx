@@ -1,21 +1,15 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata } from 'next'
+import './globals.css'
 
 export const metadata: Metadata = {
-  title: "Gestor Corporativo",
-  description: "Sistema de Control",
-};
+  title: 'WUOTTO',
+  description: 'WUOTTO Services',
+}
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body className="antialiased">
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
-  );
+  )
 }

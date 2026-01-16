@@ -1,170 +1,410 @@
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { HardHat, PlayCircle, CheckCircle, MapPin, Clock, AlertTriangle, User, ChevronDown } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase-browser'
+import { CalendarDays, ChevronLeft, ChevronRight, Loader2, CheckCircle2, X, MessageSquareText, LogOut } from 'lucide-react'
 
-// Colores del tema "Flight App"
-const theme = {
-  navy: 'bg-[#0a1e3f]',
-  navyText: 'text-[#0a1e3f]',
-  lightBg: 'bg-slate-100',
-  white: 'bg-white',
-};
+type AssignmentRow = {
+  id: string
+  work_date: string // YYYY-MM-DD
+  leader_id: string | null
+  auxiliary_id: string | null
+  ticket_id: number | null
+  site_id: number | null
+  service_type: string | null
+  details: string | null
+}
 
-export default function OperativeView() {
-  const [myTickets, setMyTickets] = useState<any[]>([]);
-  const [staffList, setStaffList] = useState<any[]>([]);
-  const [currentUser, setCurrentUser] = useState<string>('Operativo Demo'); 
-  const [isLoading, setIsLoading] = useState(false);
+type TicketRow = {
+  id: number
+  codigo_servicio: string | null
+  status: string | null
+  priority: string | null
+  description: string | null
+  location: string | null
+  service_type: string | null
+  company: string | null
+  scheduled_date: string | null
+}
 
-  // 1. Cargar lista de staff
+type SiteRow = {
+  id: number
+  name: string | null
+  state: string | null
+  client_id: string | null
+}
+
+function startOfWeekMonday(d: Date) {
+  const x = new Date(d)
+  const day = x.getDay()
+  const diff = x.getDate() - day + (day === 0 ? -6 : 1)
+  x.setDate(diff)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+function toYMD(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+export default function OperativeView({ currentUser }: { currentUser: any }) {
+  const router = useRouter()
+
+  const userId = (currentUser?.id || '').toString()
+  const isLeader =
+    (currentUser?.crew_role || '').toString().toLowerCase().trim() === 'lider' ||
+    (currentUser?.position || '').toString().toUpperCase().includes('LIDER')
+
+  const [weekBase, setWeekBase] = useState<Date>(() => new Date())
+  const monday = useMemo(() => startOfWeekMonday(weekBase), [weekBase])
+  const sunday = useMemo(() => {
+    const s = new Date(monday)
+    s.setDate(monday.getDate() + 6)
+    return s
+  }, [monday])
+
+  const [loading, setLoading] = useState(true)
+  const [rows, setRows] = useState<
+    Array<
+      AssignmentRow & {
+        ticket?: TicketRow | null
+        site?: SiteRow | null
+      }
+    >
+  >([])
+
+  // Modal finalizar
+  const [finishOpen, setFinishOpen] = useState(false)
+  const [finishTicket, setFinishTicket] = useState<TicketRow | null>(null)
+  const [finishComment, setFinishComment] = useState('')
+  const [savingFinish, setSavingFinish] = useState(false)
+
+  const weekDays = useMemo(
+    () => [
+      { label: 'LUN', idx: 0 },
+      { label: 'MAR', idx: 1 },
+      { label: 'MIE', idx: 2 },
+      { label: 'JUE', idx: 3 },
+      { label: 'VIE', idx: 4 },
+      { label: 'SAB', idx: 5 },
+      { label: 'DOM', idx: 6 },
+    ],
+    []
+  )
+
+  const board = useMemo(() => {
+    const map: Record<string, any[]> = {}
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday)
+      d.setDate(monday.getDate() + i)
+      map[toYMD(d)] = []
+    }
+    rows.forEach((r) => {
+      if (!map[r.work_date]) map[r.work_date] = []
+      map[r.work_date].push(r)
+    })
+    return map
+  }, [rows, monday])
+
+  const totalWeek = useMemo(() => rows.length, [rows])
+
+  async function fetchWeek() {
+    if (!userId) return
+    setLoading(true)
+
+    try {
+      const start = toYMD(monday)
+      const end = toYMD(sunday)
+
+      // 1) assignments de la semana, donde yo soy líder o auxiliar
+      const { data: aData, error: aErr } = await supabase
+        .from('assignments')
+        .select('id, work_date, leader_id, auxiliary_id, ticket_id, site_id, service_type, details')
+        .gte('work_date', start)
+        .lte('work_date', end)
+        .or(`leader_id.eq.${userId},auxiliary_id.eq.${userId}`)
+        .order('work_date', { ascending: true })
+
+      if (aErr) throw aErr
+
+      const assignments = (aData || []) as AssignmentRow[]
+
+      const ticketIds = Array.from(new Set(assignments.map((x) => x.ticket_id).filter(Boolean))) as number[]
+      const siteIds = Array.from(new Set(assignments.map((x) => x.site_id).filter(Boolean))) as number[]
+
+      // 2) tickets relacionados
+      let ticketsById = new Map<number, TicketRow>()
+      if (ticketIds.length) {
+        const { data: tData, error: tErr } = await supabase
+          .from('tickets')
+          .select('id, codigo_servicio, status, priority, description, location, service_type, company, scheduled_date')
+          .in('id', ticketIds)
+
+        if (tErr) throw tErr
+        ;(tData || []).forEach((t: any) => ticketsById.set(Number(t.id), t as TicketRow))
+      }
+
+      // 3) sites relacionados
+      let sitesById = new Map<number, SiteRow>()
+      if (siteIds.length) {
+        const { data: sData, error: sErr } = await supabase
+          .from('sites')
+          .select('id, name, state, client_id')
+          .in('id', siteIds)
+
+        if (sErr) throw sErr
+        ;(sData || []).forEach((s: any) => sitesById.set(Number(s.id), s as SiteRow))
+      }
+
+      const merged = assignments.map((a) => ({
+        ...a,
+        ticket: a.ticket_id ? ticketsById.get(a.ticket_id) || null : null,
+        site: a.site_id ? sitesById.get(a.site_id) || null : null,
+      }))
+
+      setRows(merged)
+    } catch (e: any) {
+      console.error('OperativeView fetchWeek error:', e?.message)
+      alert(e?.message || 'Error cargando asignaciones')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    const fetchStaff = async () => {
-      const { data } = await supabase.from('profiles').select('full_name').in('role', ['operativo', 'coordinador']);
-      if (data) setStaffList(data);
-    };
-    fetchStaff();
-  }, []);
+    fetchWeek()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, monday.getTime()])
 
-  // 2. Cargar tickets asignados
-  const fetchMyTasks = async () => {
-    setIsLoading(true);
-    const { data } = await supabase
-      .from('tickets')
-      .select('*')
-      .eq('assigned_to', currentUser)
-      .neq('status', 'cerrado')
-      .order('priority', { ascending: true });
-    
-    if (data) setMyTickets(data);
-    setIsLoading(false);
-  };
+  async function logout() {
+    try {
+      await supabase.auth.signOut()
+    } catch {}
+    ;['kiosk_device_user', 'client_user', 'kiosco_user', 'kiosk_user', 'kiosk_session'].forEach((k) =>
+      localStorage.removeItem(k)
+    )
+    router.replace('/accesos/kiosk')
+  }
 
-  useEffect(() => {
-    fetchMyTasks();
-  }, [currentUser]);
+  function openFinish(t: TicketRow) {
+    setFinishTicket(t)
+    setFinishComment('')
+    setFinishOpen(true)
+  }
 
-  // 3. Update status
-  const updateStatus = async (id: number, newStatus: string) => {
-    setMyTickets(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t));
-    await supabase.from('tickets').update({ status: newStatus }).eq('id', id);
-    fetchMyTasks();
-  };
+  async function confirmFinish() {
+    if (!finishTicket?.id) return
+    setSavingFinish(true)
+
+    try {
+      const { error } = await supabase
+        .from('tickets')
+        .update({
+          status: 'Ejecutado',
+          service_done_at: new Date().toISOString(),
+          service_done_by: userId,
+          service_done_comment: finishComment?.trim() || null,
+        })
+        .eq('id', finishTicket.id)
+
+      if (error) throw error
+
+      setFinishOpen(false)
+      setFinishTicket(null)
+      setFinishComment('')
+      await fetchWeek()
+    } catch (e: any) {
+      alert(e?.message || 'Error al finalizar servicio')
+    } finally {
+      setSavingFinish(false)
+    }
+  }
 
   return (
-    // FONDO GENERAL CLARO
-    <div className={`min-h-screen ${theme.lightBg} p-6 md:p-10 font-sans text-slate-800 space-y-8 animate-in fade-in duration-500 pb-24`}>
-      
-      {/* HEADER OPERATIVO (Estilo Bloque Azul Sólido) */}
-      <div className={`${theme.navy} p-8 rounded-[2.5rem] shadow-xl shadow-slate-300/50 flex flex-col md:flex-row justify-between items-center gap-6`}>
+    <div className="min-h-screen bg-slate-100 p-6 md:p-10 space-y-6">
+      {/* Header */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-center gap-4">
-            <div className="bg-white/10 p-3 rounded-full text-white">
-                <HardHat size={32}/>
-            </div>
-            <div>
-                <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight">Zona Operativa</h2>
-                <p className="text-blue-200 font-medium">
-                    Tienes <strong className="text-white text-lg">{myTickets.length}</strong> órdenes activas hoy.
-                </p>
-            </div>
-        </div>
-
-        {/* SELECTOR DE IDENTIDAD (Estilo Píldora Transparente) */}
-        <div className="flex items-center gap-3 bg-white/10 px-5 py-2.5 rounded-full backdrop-blur-sm border border-white/20">
-            <User size={16} className="text-blue-200"/>
-            <span className="text-[10px] text-blue-200 uppercase font-black tracking-wider">Perfil:</span>
-            <div className="relative">
-                <select 
-                    value={currentUser}
-                    onChange={(e) => setCurrentUser(e.target.value)}
-                    className="bg-transparent text-white text-sm font-bold outline-none cursor-pointer appearance-none pr-6"
-                >
-                    <option className="text-slate-800" value="Operativo Demo">Operativo Demo</option>
-                    {staffList.map((s, i) => <option className="text-slate-800" key={i} value={s.full_name}>{s.full_name}</option>)}
-                </select>
-                <ChevronDown size={14} className="absolute right-0 top-1/2 -translate-y-1/2 text-white pointer-events-none"/>
-            </div>
-        </div>
-      </div>
-
-      {/* LISTA DE TARJETAS DE TRABAJO (Estilo Tarjetas Blancas Redondeadas) */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {myTickets.map(ticket => (
-          <div key={ticket.id} className={`relative bg-white p-6 md:p-8 rounded-[2.5rem] transition-all hover:-translate-y-1 group ${
-             ticket.priority === 'Crítica' ? 'shadow-xl shadow-red-100 ring-2 ring-red-50' : 
-             ticket.status === 'en_proceso' ? 'shadow-xl shadow-blue-100 ring-2 ring-blue-50' :
-             'shadow-lg shadow-slate-200/50'
-          }`}>
-            
-            {/* ETIQUETAS SUPERIORES */}
-            <div className="flex justify-between items-center mb-5">
-              <span className="font-mono text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">#{ticket.id}</span>
-              <span className={`text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-wide flex items-center gap-1.5 ${
-                ticket.priority === 'Crítica' ? 'bg-red-500 text-white animate-pulse' : 
-                ticket.priority === 'Alta' ? 'bg-orange-500 text-white' :
-                'bg-slate-200 text-slate-600'
-              }`}>
-                {ticket.priority === 'Crítica' && <AlertTriangle size={12} fill="currentColor"/>}
-                {ticket.priority}
-              </span>
-            </div>
-            
-            {/* INFORMACIÓN PRINCIPAL */}
-            <h4 className={`text-xl font-black ${theme.navyText} mb-3 leading-tight`}>{ticket.service_type}</h4>
-            
-            <div className="bg-slate-50 p-4 rounded-2xl mb-5 border border-slate-100">
-                 <p className="text-sm text-slate-600 font-medium italic leading-relaxed">"{ticket.description || 'Sin descripción detallada'}"</p>
-            </div>
-            
-            <div className="flex items-center gap-2 text-slate-500 text-xs mb-8 font-bold uppercase tracking-wide">
-              <MapPin size={16} className="text-blue-600"/> {ticket.location}
-            </div>
-
-            {/* BOTONES DE ACCIÓN (Estilo Píldora Grande) */}
-            <div className="mt-auto">
-                {ticket.status === 'pendiente' && (
-                    <button 
-                        onClick={() => updateStatus(ticket.id, 'en_proceso')}
-                        className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-full flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-200 hover:shadow-xl"
-                    >
-                        <PlayCircle size={20} fill="currentColor" className="text-blue-200"/> INICIAR TAREA
-                    </button>
-                )}
-
-                {ticket.status === 'en_proceso' && (
-                    <div className="flex flex-col gap-3">
-                        <div className="w-full py-3 bg-blue-50 border border-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs font-black gap-2 animate-pulse">
-                            <Clock size={16}/> TRABAJO EN CURSO...
-                        </div>
-                        <button 
-                            onClick={() => updateStatus(ticket.id, 'revision')}
-                            className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-full flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-200"
-                        >
-                            <CheckCircle size={20}/> FINALIZAR
-                        </button>
-                    </div>
-                )}
-
-                {(ticket.status === 'revision' || ticket.status === 'cerrado') && (
-                    <div className="w-full py-4 bg-slate-100 text-slate-400 font-black rounded-full flex items-center justify-center gap-2 cursor-not-allowed">
-                        <CheckCircle size={20}/> TAREA COMPLETADA
-                    </div>
-                )}
-            </div>
-
+          <div className="p-3 rounded-2xl bg-[#0a1e3f] text-white">
+            <CalendarDays size={22} />
           </div>
-        ))}
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Panel Operativo</p>
+            <h2 className="text-xl md:text-2xl font-black text-slate-800 uppercase leading-tight">
+              {currentUser?.full_name || currentUser?.email || 'Operativo'}
+            </h2>
+            <p className="text-xs font-bold text-slate-500">
+              Semana: {monday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} –{' '}
+              {sunday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} •{' '}
+              <span className="text-slate-800">{totalWeek}</span> servicios
+            </p>
+            <p className="text-[10px] font-black uppercase tracking-widest mt-1">
+              <span className={`px-3 py-1 rounded-full ${isLeader ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
+                {isLeader ? 'LÍDER' : 'AUXILIAR'}
+              </span>
+            </p>
+          </div>
+        </div>
 
-        {myTickets.length === 0 && (
-            <div className="col-span-full text-center p-12 bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] text-slate-400 flex flex-col items-center">
-                <div className="bg-slate-50 p-4 rounded-full mb-4">
-                    <CheckCircle size={40} className="text-slate-300"/>
-                </div>
-                <p className="font-bold">¡Todo limpio! No tienes asignaciones pendientes.</p>
-            </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setWeekBase(new Date(weekBase.setDate(weekBase.getDate() - 7)))}
+            className="px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:bg-white"
+          >
+            <ChevronLeft size={16} />
+          </button>
+
+          <button
+            onClick={() => setWeekBase(new Date(weekBase.setDate(weekBase.getDate() + 7)))}
+            className="px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:bg-white"
+          >
+            <ChevronRight size={16} />
+          </button>
+
+          <button
+            onClick={fetchWeek}
+            className="px-6 py-3 rounded-2xl bg-[#0a1e3f] text-white font-black text-[10px] uppercase tracking-widest hover:opacity-95"
+          >
+            {loading ? 'Cargando…' : 'Actualizar'}
+          </button>
+
+          <button
+            onClick={logout}
+            className="px-5 py-3 rounded-2xl bg-white border border-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 inline-flex items-center gap-2"
+          >
+            <LogOut size={14} /> Salir
+          </button>
+        </div>
       </div>
+
+      {/* Calendar */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+            Calendario (solo lectura)
+          </p>
+          {loading && (
+            <div className="text-slate-400 font-black text-[10px] uppercase tracking-widest inline-flex items-center gap-2">
+              <Loader2 className="animate-spin" size={14} /> sincronizando
+            </div>
+          )}
+        </div>
+
+        <div className="overflow-x-auto">
+          <div className="min-w-[1100px] grid grid-cols-7 gap-4 p-6">
+            {weekDays.map((d) => {
+              const date = new Date(monday)
+              date.setDate(monday.getDate() + d.idx)
+              const ymd = toYMD(date)
+              const cards = board[ymd] || []
+
+              return (
+                <div key={d.label} className="bg-slate-50/60 rounded-[2rem] border border-slate-100 overflow-hidden">
+                  <div className="p-4 bg-white border-b border-slate-100">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.label}</p>
+                    <p className="text-sm font-black text-slate-800">{date.getDate()}</p>
+                  </div>
+
+                  <div className="p-3 space-y-3 min-h-[220px]">
+                    {cards.length === 0 ? (
+                      <div className="text-center text-slate-300 text-[10px] font-black uppercase py-8">
+                        Sin servicios
+                      </div>
+                    ) : (
+                      cards.map((c: any) => {
+                        const t = c.ticket as TicketRow | null
+                        const s = c.site as SiteRow | null
+                        const status = (t?.status || '').toString().toLowerCase()
+
+                        return (
+                          <div key={c.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black text-blue-600 uppercase truncate">
+                                  {t?.codigo_servicio ? `#${t.codigo_servicio}` : `#${t?.id ?? 'SIN TICKET'}`}
+                                </p>
+                                <p className="text-xs font-black text-slate-800 uppercase truncate">
+                                  {s?.name || t?.company || 'Servicio'}
+                                </p>
+                                <p className="text-[11px] font-bold text-slate-500 truncate">
+                                  {c.service_type || t?.service_type || '—'}
+                                </p>
+                                <p className="text-[10px] font-bold text-slate-400 mt-1 truncate">
+                                  {t?.location || '—'}
+                                </p>
+                              </div>
+
+                              <span
+                                className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-black uppercase ${
+                                  status === 'ejecutado'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : status === 'en proceso'
+                                    ? 'bg-blue-50 text-blue-700'
+                                    : 'bg-slate-100 text-slate-500'
+                                }`}
+                              >
+                                {t?.status || 'ASIGNADO'}
+                              </span>
+                            </div>
+
+                            {isLeader && t?.id && status !== 'ejecutado' && (
+                              <button
+                                onClick={() => openFinish(t)}
+                                className="mt-3 w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest inline-flex items-center justify-center gap-2"
+                              >
+                                <CheckCircle2 size={16} /> Marcar ejecutado
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Modal finalizar */}
+      {finishOpen && finishTicket && (
+        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl overflow-hidden">
+            <div className="bg-[#0a1e3f] text-white p-6 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#00C897]">Finalizar servicio</p>
+                <p className="font-black uppercase">{finishTicket.codigo_servicio || finishTicket.id}</p>
+              </div>
+              <button onClick={() => setFinishOpen(false)} className="text-white/70 hover:text-white">
+                <X />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 inline-flex items-center gap-2">
+                <MessageSquareText size={14} /> Comentario del líder (opcional)
+              </label>
+              <textarea
+                value={finishComment}
+                onChange={(e) => setFinishComment(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-200 min-h-[120px]"
+                placeholder="Ej: Se realizó servicio, se cambió pieza X, recomendaciones..."
+              />
+
+              <button
+                disabled={savingFinish}
+                onClick={confirmFinish}
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest disabled:opacity-60"
+              >
+                {savingFinish ? 'Guardando...' : 'Confirmar finalización'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }

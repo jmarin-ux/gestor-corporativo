@@ -1,8 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+// lib/supabase.ts
+import { createBrowserClient } from '@supabase/ssr'
 
-// Estas líneas leen las llaves que pusimos en el paso anterior
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-// Creamos y exportamos la conexión lista para usarse
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Al usar createBrowserClient, Supabase gestionará automáticamente 
+// las cookies para sincronizarse con tu proxy.ts (middleware)
+export const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)

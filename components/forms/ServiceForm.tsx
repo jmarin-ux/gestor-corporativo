@@ -1,190 +1,224 @@
-'use client';
+'use client'
 
-import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
-import { Send, MapPin, Loader2, ChevronDown, ShieldCheck, Phone, User, Camera, X, Info, Lock } from 'lucide-react';
+import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase-browser'
+import { Send, MapPin, Loader2, ChevronDown, Info, Lock, Phone, User } from 'lucide-react'
 
-const SERVICE_INFO = {
-  "Correctivo Programado": "Reparación de un fallo o avería no crítica.",
-  "Instalacion/Montaje": "Puesta en marcha o montaje de equipos o sistemas nuevos que requieren configuración inicial.",
-  "Configuracion/Ajuste": "Solicitud para modificar parámetros, actualizar software o realizar ajustes finos a equipos ya instalados.",
-  "Visita Tecnica": "Solicitud de visita o recorrido por parte de un especialista sin implicar una reparación inmediata.",
-  "Conservacion Inmueble": "Solicitudes relacionadas con la infraestructura: electricidad, fontanería, pintura, etc.",
-  "Correctivo Emergencia": "Fallo crítico o detención total de un equipo/sistema que requiere atención inmediata."
-};
+const SERVICE_INFO: Record<string, string> = {
+  'Correctivo Programado': 'Reparación de un fallo o avería no crítica.',
+  'Instalacion/Montaje': 'Puesta en marcha o montaje de equipos o sistemas nuevos.',
+  'Configuracion/Ajuste': 'Modificar parámetros o actualizar software.',
+  'Visita Tecnica': 'Recorrido por parte de un especialista sin reparación inmediata.',
+  'Conservacion Inmueble': 'Electricidad, fontanería, pintura, infraestructura.',
+  'Correctivo Emergencia': 'Fallo crítico que requiere atención inmediata.',
+}
 
 export default function ServiceForm({ currentUser }: { currentUser: any }) {
-  const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedImages, setSelectedImages] = useState<File[]>([]);
-  
+  const router = useRouter()
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
   const [formData, setFormData] = useState({
     service_type: '',
     location: '',
     description: '',
-    phone: currentUser?.phone_number || currentUser?.phone || '', 
-    full_name: currentUser?.full_name || '' 
-  });
+    // Intentamos obtener el teléfono de varias propiedades posibles
+    phone: currentUser?.phone || currentUser?.phone_number || '', 
+    full_name: currentUser?.contact_name || currentUser?.full_name || '',
+  })
 
-  // --- LÓGICA DE NOMENCLATURA RECUPERADA ---
+  const serviceHint = useMemo(() => {
+    if (!formData.service_type) return null
+    return SERVICE_INFO[formData.service_type] ?? null
+  }, [formData.service_type])
+
   const generateServiceCode = (type: string) => {
-    const prefixes: { [key: string]: string } = {
-      "Correctivo Programado": "CP",
-      "Instalacion/Montaje": "IM",
-      "Configuracion/Ajuste": "CA",
-      "Visita Tecnica": "VT",
-      "Conservacion Inmueble": "CI",
-      "Correctivo Emergencia": "ME"
-    };
-
-    const prefix = prefixes[type] || "SR"; // SR = Service Report (Genérico)
-    const now = new Date();
-    const year = now.getFullYear().toString().slice(-2); // "25"
-    const month = (now.getMonth() + 1).toString().padStart(2, '0'); // "12"
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase(); // 4 chars aleatorios
-
-    return `${prefix}${year}${month}${random}`; // Ej: ME2512D2B4
-  };
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const filesArray = Array.from(e.target.files);
-      if (selectedImages.length + filesArray.length > 3) {
-        alert("Máximo 3 fotos permitidas.");
-        return;
-      }
-      setSelectedImages([...selectedImages, ...filesArray]);
+    const prefixes: Record<string, string> = {
+      'Correctivo Programado': 'CP',
+      'Instalacion/Montaje': 'IM',
+      'Configuracion/Ajuste': 'CA',
+      'Visita Tecnica': 'VT',
+      'Conservacion Inmueble': 'CI',
+      'Correctivo Emergencia': 'ME',
     }
-  };
-
-  const removeImage = (index: number) => {
-    setSelectedImages(selectedImages.filter((_, i) => i !== index));
-  };
+    const prefix = prefixes[type] || 'SR'
+    const now = new Date()
+    const year = now.getFullYear().toString().slice(-2)
+    const month = (now.getMonth() + 1).toString().padStart(2, '0')
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase()
+    return `${prefix}${year}${month}${random}`
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser?.email) return;
+    e.preventDefault()
+    setErrorMsg(null)
 
-    setIsSubmitting(true);
+    if (!currentUser?.email || !currentUser?.id) {
+      setErrorMsg('No se detectó sesión activa. Por favor, recarga la página.')
+      return
+    }
 
-    // Generamos el folio único antes de insertar
-    const folio = generateServiceCode(formData.service_type);
+    setIsSubmitting(true)
 
-    const { error } = await supabase.from('tickets').insert([
-      {
-        ...formData,
-        codigo_servicio: folio, // Insertamos la nomenclatura
-        client_email: currentUser.email.trim().toLowerCase(),
-        company: currentUser.company || 'Particular',
-        status: 'Sin asignar',
-        priority: formData.service_type === 'Correctivo Emergencia' ? 'Urgente' : 'Normal'
+    try {
+      // 1. Validar Coordinador (Regla de negocio crítica)
+      if (!currentUser.coordinator_id) {
+        throw new Error("Tu cuenta no tiene un Coordinador asignado. Contacta a soporte.");
       }
-    ]);
 
-    if (!error) router.push('/dashboard?role=client');
-    else alert("Error al guardar: " + error.message);
-    
-    setIsSubmitting(false);
-  };
+      // 2. Generar Folio
+      const folio = generateServiceCode(formData.service_type)
+      
+      // 3. Preparar Payload
+      const payload = {
+        service_type: formData.service_type,
+        location: formData.location,
+        description: formData.description,
+        phone: formData.phone,
+        full_name: formData.full_name, // Persona que solicita
+        contact_name: formData.full_name, // Contacto en sitio
+        codigo_servicio: folio,
+        client_email: currentUser.email.trim().toLowerCase(),
+        company: currentUser.organization || 'Particular',
+        coordinator_id: currentUser.coordinator_id, // Vinculación automática
+        status: 'Pendiente', // Estatus inicial correcto
+        priority: formData.service_type === 'Correctivo Emergencia' ? 'Urgente' : 'Normal',
+        evidence_urls: [], 
+      }
 
-  const inputStyles = "w-full bg-[#131c35] border border-slate-700/50 rounded-2xl p-4 pl-12 text-sm text-white font-bold outline-none focus:ring-2 focus:ring-purple-500 transition-all placeholder:text-slate-500";
-  const lockedInputStyles = `${inputStyles} opacity-50 cursor-not-allowed bg-slate-900/50 select-none border-dashed`;
-  const labelStyles = "text-[11px] font-black uppercase text-slate-400 ml-4 tracking-[0.15em] flex items-center gap-2";
+      const { error } = await supabase.from('tickets').insert([payload])
+
+      if (error) throw error
+
+      // 🟢 REDIRECCIÓN CORRECTA AL PORTAL DE CLIENTE
+      router.push('/accesos/cliente')
+      
+    } catch (err: any) {
+      console.error("Error:", err)
+      setErrorMsg(err?.message || 'Error inesperado al guardar el servicio')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Estilos reutilizables
+  const labelStyle = 'text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1 mb-1.5 block'
+  const inputStyle = 'w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 text-sm font-bold text-slate-800 outline-none transition-all focus:border-[#00C897] focus:ring-2 focus:ring-[#00C897]/20 placeholder:text-slate-300'
+  const lockedStyle = 'w-full bg-slate-100 border border-slate-200 rounded-2xl px-5 py-4 text-sm font-bold text-slate-500 outline-none cursor-not-allowed select-none pl-12'
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 text-left relative z-20">
+    <form onSubmit={handleSubmit} className="space-y-6 text-left animate-in fade-in zoom-in duration-500">
       
-      {/* SECCIÓN: IDENTIDAD (BLOQUEADA) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-3">
-          <label className={labelStyles}>Nombre del Solicitante <Lock size={10}/></label>
-          <div className="relative">
-            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={18}/>
-            <input readOnly type="text" value={formData.full_name} className={lockedInputStyles} />
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-100 p-4 rounded-2xl text-red-600 text-xs font-bold flex items-center gap-2 animate-pulse">
+          <Info size={16} /> {errorMsg}
+        </div>
+      )}
+
+      {/* SECCIÓN 1: IDENTIDAD */}
+      <div className="bg-slate-50 border border-slate-100 rounded-[2rem] p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-2xl bg-[#00C897]/10 text-[#00C897] flex items-center justify-center shadow-sm">
+            <Lock size={18} />
+          </div>
+          <div>
+            <p className="text-xs font-black text-slate-800 uppercase tracking-tight">Datos del solicitante</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protegidos por el sistema</p>
           </div>
         </div>
-        <div className="space-y-3">
-          <label className={labelStyles}>Teléfono de Contacto <Lock size={10}/></label>
-          <div className="relative">
-            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={18}/>
-            <input readOnly type="tel" value={formData.phone} className={lockedInputStyles} />
-          </div>
-        </div>
-      </div>
 
-      {/* CATEGORÍAS */}
-      <div className="space-y-3">
-        <label className={labelStyles}>Tipo de Mantenimiento Requerido *</label>
-        <div className="relative">
-          <select 
-            required 
-            className={`${inputStyles} pl-5 appearance-none pr-10 cursor-pointer`}
-            onChange={(e) => setFormData({...formData, service_type: e.target.value})}
-          >
-            <option value="" className="bg-[#0a0f24]">Seleccione categoría...</option>
-            {Object.keys(SERVICE_INFO).map((key) => (
-              <option key={key} value={key} className="bg-[#0a0f24]">{key}</option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20}/>
-        </div>
-
-        {formData.service_type && (
-          <div className="p-4 rounded-xl border bg-blue-500/10 border-blue-500/20 animate-in fade-in duration-300">
-            <div className="flex gap-3 text-blue-400">
-              <Info size={16} className="shrink-0 mt-0.5" />
-              <p className="text-xs text-slate-300 italic font-medium">
-                {SERVICE_INFO[formData.service_type as keyof typeof SERVICE_INFO]}
-              </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelStyle}>Solicitante</label>
+            <div className="relative">
+              <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input readOnly value={formData.full_name} className={lockedStyle} />
             </div>
           </div>
-        )}
-      </div>
 
-      {/* UBICACIÓN */}
-      <div className="space-y-3">
-        <label className={labelStyles}>Ubicación / Sucursal</label>
-        <div className="relative">
-          <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-400" size={18}/>
-          <input required type="text" placeholder="Ej. Planta Norte o Local 45" className={inputStyles} onChange={(e)=>setFormData({...formData, location: e.target.value})}/>
-        </div>
-      </div>
-
-      {/* FOTOS */}
-      <div className="space-y-3">
-        <label className={labelStyles}>Evidencia (Máx 3 fotos)</label>
-        <div className="grid grid-cols-4 gap-4">
-          {selectedImages.map((file, index) => (
-            <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-slate-700/50">
-              <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
-              <button type="button" onClick={() => removeImage(index)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-lg"><X size={12}/></button>
+          <div>
+            <label className={labelStyle}>Contacto</label>
+            <div className="relative">
+              <Phone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input readOnly value={formData.phone} className={lockedStyle} />
             </div>
-          ))}
-          {selectedImages.length < 3 && (
-            <label className="aspect-square rounded-xl border-2 border-dashed border-slate-700/50 flex flex-col items-center justify-center cursor-pointer hover:border-purple-500 text-slate-500 hover:text-purple-500">
-              <Camera size={24} />
-              <span className="text-[10px] font-bold mt-1">AÑADIR</span>
-              <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageChange} />
-            </label>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* DESCRIPCIÓN */}
-      <div className="space-y-3">
-        <label className={labelStyles}>Descripción de la Falla</label>
-        <textarea required rows={4} placeholder="Detalle el problema aquí..." className="w-full bg-[#131c35] border border-slate-700/50 rounded-[1.5rem] p-6 text-sm text-white font-medium outline-none focus:ring-2 focus:ring-purple-500 transition-all resize-none italic" onChange={(e)=>setFormData({...formData, description: e.target.value})}/>
+      {/* SECCIÓN 2: DETALLES */}
+      <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm">
+            <Info size={18} />
+          </div>
+          <div>
+            <p className="text-xs font-black text-slate-800 uppercase tracking-tight">Detalles del Servicio</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Define tu requerimiento</p>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <div>
+            <label className={labelStyle}>Categoría del Mantenimiento *</label>
+            <div className="relative group">
+              <select
+                required
+                value={formData.service_type}
+                onChange={(e) => setFormData({ ...formData, service_type: e.target.value })}
+                className={`${inputStyle} appearance-none pr-12 cursor-pointer`}
+              >
+                <option value="">-- SELECCIONAR CATEGORÍA --</option>
+                {Object.keys(SERVICE_INFO).map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+            {serviceHint && (
+              <div className="mt-3 p-4 rounded-2xl border border-blue-100 bg-blue-50/50 text-blue-800 text-xs font-medium flex gap-3 animate-in slide-in-from-top-2">
+                <Info size={16} className="shrink-0 mt-0.5 text-blue-600" />
+                <span>{serviceHint}</span>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className={labelStyle}>Ubicación Exacta / Área *</label>
+            <div className="relative">
+              <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+              <input
+                required
+                value={formData.location}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                placeholder="Ej. Planta Norte, Local 45, Oficina Principal"
+                className={`${inputStyle} pl-12`}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelStyle}>Descripción de la Falla *</label>
+            <textarea
+              required
+              rows={4}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Describa el problema con el mayor detalle posible..."
+              className={`${inputStyle} resize-none`}
+            />
+          </div>
+        </div>
       </div>
 
-      <button disabled={isSubmitting} className="w-full bg-gradient-to-r from-purple-600 to-blue-600 py-5 rounded-full font-black uppercase tracking-[0.2em] shadow-lg shadow-purple-500/25 transition-all flex items-center justify-center gap-3 disabled:opacity-50">
-        {isSubmitting ? <Loader2 className="animate-spin" size={20}/> : <><Send size={18}/> Enviar Reporte</>}
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="w-full bg-[#0a1e3f] hover:bg-[#00C897] text-white py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-[11px] shadow-xl transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
+      >
+        {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <><Send size={18} /> GENERAR TICKET</>}
       </button>
-
-      <div className="flex items-center justify-center gap-2 pt-2">
-        <ShieldCheck size={12} className="text-slate-500"/>
-        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Autenticado como: {currentUser?.email}</p>
-      </div>
     </form>
-  );
+  )
 }

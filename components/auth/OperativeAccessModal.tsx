@@ -3,8 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { HardHat, Delete, Loader2, X, Mail, ArrowRight, Users, ChevronLeft, ShieldCheck, Lock } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
-
+import { supabase } from '../../lib/supabase'
 interface Props { onClose: () => void; }
 type Step = 'email' | 'password' | 'selection' | 'pin';
 

@@ -1,98 +1,101 @@
-'use client';
+'use client'
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { UserPlus, Zap, Lock, ChevronRight, Activity, Cpu, HardHat } from 'lucide-react';
-// Importamos tu nuevo componente
-import OperativeAccessModal from '@/components/auth/OperativeAccessModal';
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Loader2, ArrowRight, LayoutGrid } from 'lucide-react'
+import { supabase } from '@/lib/supabase-browser'
 
-export default function CentralAccessPanel() {
-  const [showPinPad, setShowPinPad] = useState(false);
+export default function LandingPage() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    const checkSession = async () => {
+      // 1. Verificar si ya hay sesión iniciada
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (session) {
+        // Si hay usuario, consultamos su rol para redirigirlo
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single()
+
+        const role = (profile?.role || '').toLowerCase().trim()
+
+        // Redirección inteligente
+        if (['admin', 'coordinador', 'superadmin'].includes(role)) {
+            router.replace('/dashboard')
+        } else if (['operativo', 'staff', 'technician'].includes(role)) {
+            router.replace('/dashboard-staff')
+        } else if (['client', 'cliente'].includes(role)) {
+            router.replace('/accesos/cliente')
+        } else {
+            setLoading(false) // Rol raro, mostramos portada
+        }
+      } else {
+        setLoading(false) // No hay sesión, mostramos portada
+      }
+    }
+
+    checkSession()
+  }, [router])
+
+  if (loading) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-[#0a1e3f]">
+        <Loader2 className="h-10 w-10 animate-spin text-[#00C897] mb-4"/>
+        <p className="text-white font-bold tracking-widest text-xs uppercase">Verificando...</p>
+      </div>
+    )
+  }
+
+  // --- VISTA DE PORTADA ---
   return (
-    <main className="min-h-screen bg-[#020617] text-white relative font-sans selection:bg-blue-500/30">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       
-      {/* HEADER */}
-      <header className="flex justify-between items-center p-6 md:px-12 border-b border-white/5">
+      {/* Barra Superior */}
+      <nav className="p-6 flex justify-between items-center max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-2">
-           <div className="w-8 h-8 bg-blue-600/20 text-blue-400 rounded-lg flex items-center justify-center border border-blue-500/20">
-             <Cpu size={18} />
-           </div>
-           <span className="font-black tracking-tight text-lg">CORP<span className="text-blue-500">OPS</span></span>
+            <div className="bg-[#0a1e3f] p-2 rounded-lg">
+                <LayoutGrid className="text-[#00C897]" size={20}/>
+            </div>
+            <span className="font-black text-[#0a1e3f] text-lg tracking-tight">WUOTTO<span className="text-[#00C897]">SYSTEMS</span></span>
         </div>
-        <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest">
-            <Activity size={12} /> Portal Activo
-        </div>
-      </header>
+        <button 
+            onClick={() => router.push('/login')}
+            className="font-bold text-[#0a1e3f] text-sm hover:text-[#00C897] transition-colors uppercase tracking-widest"
+        >
+            Iniciar Sesión
+        </button>
+      </nav>
 
-      {/* CONTENIDO PRINCIPAL */}
-      <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 py-12">
-        
-        <div className="text-center mb-16 space-y-4 max-w-2xl">
-            <h1 className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-none">
-                Panel de <br/>
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600">Ingreso Central</span>
+      {/* Centro */}
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+        <div className="bg-white p-12 rounded-[3rem] shadow-2xl border border-slate-100 max-w-3xl w-full animate-in zoom-in-95 duration-500">
+            <div className="inline-block bg-blue-50 text-blue-600 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest mb-6">
+                Portal Corporativo v2.0
+            </div>
+            <h1 className="text-4xl md:text-6xl font-black text-[#0a1e3f] mb-6 tracking-tight leading-tight">
+                GESTIÓN <span className="text-[#00C897]">OPERATIVA</span> INTEGRAL
             </h1>
-            <p className="text-slate-400 font-medium text-lg">Seleccione la operación que desea realizar para continuar.</p>
-        </div>
+            <p className="text-slate-400 font-medium text-lg mb-10 max-w-lg mx-auto leading-relaxed">
+                Plataforma centralizada para el control de tickets, asignación de personal técnico y administración de activos.
+            </p>
 
-        {/* GRID DE OPCIONES */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
-            
-            {/* 1. Nuevo Cliente */}
-            <div className="group bg-slate-900/50 hover:bg-slate-900 border border-white/5 hover:border-cyan-500/30 rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1">
-                <div className="w-14 h-14 bg-cyan-950/30 text-cyan-400 rounded-2xl flex items-center justify-center mb-6 border border-cyan-500/20 group-hover:scale-110 transition-transform">
-                    <UserPlus size={28} />
-                </div>
-                <h3 className="text-xl font-bold mb-2 text-white">Nuevo Cliente</h3>
-                <p className="text-slate-400 text-sm mb-8 leading-relaxed">Registro inicial para darse de alta en nuestra red operativa.</p>
-                <Link href="/register" className="inline-flex items-center gap-2 text-cyan-400 font-black text-xs uppercase tracking-widest group-hover:gap-3 transition-all">
-                    Crear Cuenta <ChevronRight size={14}/>
-                </Link>
-            </div>
-
-            {/* 2. Solicitar Servicio */}
-            <div className="group bg-slate-900/50 hover:bg-slate-900 border border-white/5 hover:border-purple-500/30 rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1">
-                <div className="w-14 h-14 bg-purple-950/30 text-purple-400 rounded-2xl flex items-center justify-center mb-6 border border-purple-500/20 group-hover:scale-110 transition-transform">
-                    <Zap size={28} />
-                </div>
-                <h3 className="text-xl font-bold mb-2 text-white">Solicitar Servicio</h3>
-                <p className="text-slate-400 text-sm mb-8 leading-relaxed">Levantar un requerimiento o ticket técnico inmediato.</p>
-                <Link href="/tickets/new" className="inline-flex items-center gap-2 text-purple-400 font-black text-xs uppercase tracking-widest group-hover:gap-3 transition-all">
-                    Generar Ticket <ChevronRight size={14}/>
-                </Link>
-            </div>
-
-            {/* 3. Consola Staff (Admin) */}
-            <div className="group bg-slate-900/50 hover:bg-slate-900 border border-white/5 hover:border-blue-500/30 rounded-[2rem] p-8 transition-all duration-300 hover:-translate-y-1">
-                <div className="w-14 h-14 bg-blue-950/30 text-blue-400 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/20 group-hover:scale-110 transition-transform">
-                    <Lock size={28} />
-                </div>
-                <h3 className="text-xl font-bold mb-2 text-white">Consola Staff</h3>
-                <p className="text-slate-400 text-sm mb-8 leading-relaxed">Acceso exclusivo para gestión y administración del sistema.</p>
-                <Link href="/login" className="inline-flex items-center gap-2 text-blue-400 font-black text-xs uppercase tracking-widest group-hover:gap-3 transition-all">
-                    Entrar al Panel <ChevronRight size={14}/>
-                </Link>
-            </div>
-        </div>
-
-        {/* BOTÓN DISCRETO OPERATIVO */}
-        <div className="mt-16 opacity-30 hover:opacity-100 transition-opacity duration-300">
             <button 
-                onClick={() => setShowPinPad(true)}
-                className="flex items-center gap-2 text-slate-500 hover:text-white px-4 py-2 rounded-full hover:bg-white/5 transition-colors"
+                onClick={() => router.push('/login')}
+                className="bg-[#0a1e3f] text-white px-10 py-5 rounded-2xl font-black uppercase tracking-widest flex items-center gap-3 mx-auto hover:bg-[#00C897] hover:scale-105 transition-all shadow-xl shadow-blue-900/20"
             >
-                <HardHat size={16} />
-                <span className="text-xs font-bold uppercase tracking-widest">Acceso Operativo</span>
+                Acceder al Sistema <ArrowRight size={20}/>
             </button>
         </div>
+
+        <p className="mt-8 text-[10px] font-bold text-slate-300 uppercase tracking-widest">
+            © 2026 Wuotto Systems • Acceso Autorizado Únicamente
+        </p>
       </div>
-
-      {/* --- AQUÍ RENDERIZAMOS EL MODAL SI ESTÁ ACTIVO --- */}
-      {showPinPad && (
-        <OperativeAccessModal onClose={() => setShowPinPad(false)} />
-      )}
-
-    </main>
-  );
+    </div>
+  )
 }
