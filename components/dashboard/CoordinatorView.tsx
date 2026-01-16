@@ -1,79 +1,79 @@
-'use client'
+'use client';
 
-import { useMemo, useState } from 'react'
-import { ClipboardList, CalendarDays, Boxes } from 'lucide-react'
+import { useMemo, useState } from 'react';
+import { ClipboardList, CalendarDays, Boxes } from 'lucide-react';
 
-// Reusa tus componentes existentes:
-import ServiceTable from '@/components/dashboard/ServiceTable'
-import PlannerView from '@/components/dashboard/PlannerView'
-import AssetsTab from '@/components/dashboard/AssetsTab'
+// Importación de Componentes
+import ServiceTable from '@/components/dashboard/ServiceTable';
+import PlannerView from '@/components/dashboard/PlannerView';
+import AssetsTab from '@/components/dashboard/AssetsTab';
 
-// Si tienes modal de detalle úsalo aquí
-// import ServiceModal from '@/components/dashboard/ServiceModal'
+type TabKey = 'servicios' | 'planner' | 'activos';
 
-type TabKey = 'servicios' | 'planner' | 'activos'
+interface CoordinatorViewProps {
+  currentUser: any;
+  clients?: any[];
+  services?: any[];
+  assets?: any[];
+  staff?: any[];
+  onRefresh: () => void;
+}
 
 export default function CoordinatorView({
   currentUser,
   clients = [],
   services = [],
-  assets = [],
+  // assets = [], // Ya no lo usamos para pasarlo, pero lo recibimos para no romper la interfaz del padre
   staff = [],
   onRefresh,
-}: any) {
-  const [activeTab, setActiveTab] = useState<TabKey>('servicios')
-  // const [openTicket, setOpenTicket] = useState<any>(null)
+}: CoordinatorViewProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>('servicios');
+  const coordinatorId = String(currentUser?.id || '');
 
-  const coordinatorId = String(currentUser?.id || '')
-
-  // 1. Clientes Asignados
+  // 1. Filtrar Clientes Asignados al Coordinador
   const myClients = useMemo(() => {
     return clients.filter((c: any) => {
-      const cid = String(c.coordinator_id || c.coordinador_id || '')
-      return cid && cid === coordinatorId
-    })
-  }, [clients, coordinatorId])
+      const cid = String(c.coordinator_id || c.coordinador_id || '');
+      return cid && cid === coordinatorId;
+    });
+  }, [clients, coordinatorId]);
 
+  // Crear un Set de emails para búsqueda rápida
   const myClientEmailSet = useMemo(() => {
     return new Set(
       myClients
         .map((c: any) => (c.email || '').toLowerCase().trim())
         .filter(Boolean)
-    )
-  }, [myClients])
+    );
+  }, [myClients]);
 
-  // 2. Servicios Visibles (Filtrados por coordinador o clientes asignados)
+  // 2. Filtrar Servicios (Asignados directamente O pertenecientes a sus clientes)
   const myServices = useMemo(() => {
     return services.filter((t: any) => {
-      const tCoord = String(t.coordinator_id || t.coordinador_id || '')
-      if (tCoord && tCoord === coordinatorId) return true
+      const tCoord = String(t.coordinator_id || t.coordinador_id || '');
+      // Si el ticket está asignado a este coordinador
+      if (tCoord && tCoord === coordinatorId) return true;
 
-      const email = (t.client_email || '').toLowerCase().trim()
-      return myClientEmailSet.has(email)
-    })
-  }, [services, coordinatorId, myClientEmailSet])
-
-  // 3. Activos Visibles (✅ CORRECCIÓN: Mostrar TODO sin filtrar)
-  // El coordinador debe tener acceso a todo el inventario para poder asignar o consultar
-  const myAssets = useMemo(() => assets, [assets])
+      // O si el ticket pertenece a uno de sus clientes
+      const email = (t.client_email || '').toLowerCase().trim();
+      return myClientEmailSet.has(email);
+    });
+  }, [services, coordinatorId, myClientEmailSet]);
 
   const tabs = [
     { key: 'servicios' as const, label: 'Operaciones', icon: ClipboardList },
     { key: 'planner' as const, label: 'Planificador', icon: CalendarDays },
     { key: 'activos' as const, label: 'Activos', icon: Boxes },
-  ]
+  ];
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* NOTA: No incluimos Header aquí porque ya existe uno global en DashboardPage.
-          Esta vista se renderiza DENTRO del layout principal.
-      */}
-
-      {/* Tabs de Navegación */}
+      
+      {/* --- TABS DE NAVEGACIÓN --- */}
       <div className="bg-white p-3 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-2">
         {tabs.map((t) => {
-          const Icon = t.icon
-          const isActive = activeTab === t.key
+          const Icon = t.icon;
+          const isActive = activeTab === t.key;
           return (
             <button
               key={t.key}
@@ -88,55 +88,46 @@ export default function CoordinatorView({
               <Icon size={16} />
               {t.label}
             </button>
-          )
+          );
         })}
       </div>
 
-      {/* Contenido Dinámico */}
+      {/* --- CONTENIDO DINÁMICO --- */}
+
+      {/* 1. TABLA DE SERVICIOS */}
       {activeTab === 'servicios' && (
-        <ServiceTable
-          services={myServices}
-          staff={staff}
-          currentUser={currentUser}
-          onRefresh={onRefresh}
-          onOpenDetails={(t: any) => {
-            // Lógica para abrir modal de detalle
-            alert(`Abrir detalle ticket: ${t.codigo_servicio || t.id}`)
-            // setOpenTicket(t)
-          }}
-        />
+        <div className="animate-in fade-in zoom-in-95 duration-300">
+            <ServiceTable
+            services={myServices}
+            staff={staff}
+            currentUser={currentUser}
+            onRefresh={onRefresh}
+            onOpenDetails={(t: any) => {
+                // Aquí puedes implementar la lógica para abrir el modal de detalles
+                console.log("Abrir ticket:", t);
+            }}
+            />
+        </div>
       )}
 
+      {/* 2. PLANIFICADOR */}
       {activeTab === 'planner' && (
-        <PlannerView
-          currentUser={currentUser}
-          // Ocultamos botón 'Back' si PlannerView lo tiene, ya que usamos Tabs aquí
-          onBack={undefined} 
-        />
+        <div className="animate-in fade-in zoom-in-95 duration-300">
+            <PlannerView
+            currentUser={currentUser}
+            onBack={undefined} // No necesitamos botón back aquí porque usamos Tabs
+            />
+        </div>
       )}
 
+      {/* 3. ACTIVOS (CORREGIDO) */}
       {activeTab === 'activos' && (
-        <AssetsTab
-          assets={myAssets}
-          clients={clients}
-          currentUser={currentUser}
-          onRefresh={onRefresh}
-          // Acciones placeholder (puedes conectar tus modales reales aquí)
-          onCreate={() => alert('Abrir modal: Crear Activo')}
-          onEdit={(asset: any) => alert('Abrir modal: Editar Activo ' + asset.nombre_activo)}
-        />
+        <div className="animate-in fade-in zoom-in-95 duration-300">
+            {/* ✅ CORRECCIÓN: Solo pasamos currentUser. AssetsTab carga sus propios datos. */}
+            <AssetsTab currentUser={currentUser} />
+        </div>
       )}
 
-      {/* Ejemplo de Modal Integrado:
-      {openTicket && (
-        <ServiceModal
-          isOpen={!!openTicket}
-          onClose={() => setOpenTicket(null)}
-          ticket={openTicket}
-          // ... props ...
-        />
-      )} 
-      */}
     </div>
-  )
+  );
 }

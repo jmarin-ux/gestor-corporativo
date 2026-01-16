@@ -1,276 +1,203 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-// ✅ CORRECCIÓN 1: Importamos todos los iconos necesarios (incluyendo Package y Loader2)
-import { X, Save, Tag, Hash, Building2, MapPin, FileText, CheckCircle2, Package, Loader2 } from 'lucide-react';
-// ✅ CORRECCIÓN 2: Cliente seguro del navegador
+import { X, Save, Box, Hash, Cpu, MapPin, Activity } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 
 interface EditAssetModalProps {
   isOpen: boolean;
-  asset: any;
-  clients: any[];
   onClose: () => void;
-  
-  // ✅ Props Híbridas (Soporte Dual)
-  onUpdate?: () => void | Promise<void>; // Dashboard Nuevo
-  onSave?: (action: string, assetData: any) => void | Promise<void>; // Legacy (SuperAdminView)
-  isProcessing?: boolean; // Control de loading externo (Legacy)
+  asset: any; // Si viene vacío es creación, si tiene datos es edición
+  clients: any[];
+  onUpdate: () => void;
 }
 
-export default function EditAssetModal({ 
-  isOpen, 
-  asset, 
-  clients = [], 
-  onClose, 
-  onUpdate, 
-  onSave, 
-  isProcessing = false 
-}: EditAssetModalProps) {
-  
-  const [formData, setFormData] = useState<any>({});
-  const [internalLoading, setInternalLoading] = useState(false);
+export default function EditAssetModal({ isOpen, onClose, asset, clients, onUpdate }: EditAssetModalProps) {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    nombre_activo: '',
+    serial_number: '',
+    modelo: '',
+    ubicacion: '',
+    status: 'activo',
+    client_id: '',
+  });
 
-  // ✅ CORRECCIÓN 3: Lógica PRO para cargar datos + clients sin loops
+  const isEditing = asset && asset.id;
+
   useEffect(() => {
-    if (!isOpen) return;
-
-    if (asset?.id && asset.id !== 'new') {
-      // MODO EDICIÓN
-      const matchingClient = clients.find((c: any) => 
-        c.organization?.toUpperCase() === asset.cliente_nombre?.toUpperCase()
-      );
-
-      setFormData((prev: any) => {
-        // Truco: Si cambiamos de activo (ID diferente), forzamos el recalculo del cliente.
-        // Si es el mismo activo y ya seleccionamos algo manual, lo respetamos.
-        const isSameAsset = prev?.id === asset.id;
-        
-        return {
-          ...asset,
-          selectedClientId: (isSameAsset && prev?.selectedClientId) 
-            ? prev.selectedClientId 
-            : (matchingClient ? matchingClient.id : '')
-        };
-      });
-
-    } else {
-      // MODO CREACIÓN (Reset limpio)
-      setFormData({ 
-          estatus: 'ACTIVO',
-          identificador: '',
-          serie: '',
-          nombre_activo: '',
-          cliente_nombre: '',
-          ubicacion: '',
-          detalles: ''
+    if (asset) {
+      setFormData({
+        nombre_activo: asset.nombre_activo || '',
+        serial_number: asset.serial_number || '',
+        modelo: asset.modelo || '',
+        ubicacion: asset.ubicacion || '',
+        status: asset.status || 'activo',
+        client_id: asset.client_id || '',
       });
     }
-  }, [isOpen, asset, clients]); // ✅ Dependencias completas y seguras
+  }, [asset]);
 
   const handleSave = async () => {
-    setInternalLoading(true);
+    if (!formData.nombre_activo) return alert('El nombre del activo es obligatorio');
+    
+    setLoading(true);
     try {
-      // 1. Preparar Payload (Nombre del cliente oficial)
-      let finalClientName = formData.cliente_nombre;
-      
-      if (formData.selectedClientId) {
-        const officialClient = clients.find((c: any) => c.id.toString() === formData.selectedClientId.toString());
-        if (officialClient) {
-            finalClientName = officialClient.organization;
-        }
-      }
+      const payload = { ...formData };
 
-      const payload = {
-        identificador: formData.identificador,
-        serie: formData.serie,
-        nombre_activo: formData.nombre_activo,
-        cliente_nombre: finalClientName,
-        ubicacion: formData.ubicacion,
-        detalles: formData.detalles,
-        estatus: formData.estatus
-      };
-
-      // 2. LÓGICA DE GUARDADO HÍBRIDA
-      const isEdit = asset?.id && asset.id !== 'new';
-
-      if (onSave) {
-        // 🅰️ MODO LEGACY (SuperAdminView) - Delegamos al padre
-        // Pasamos el ID dentro del payload para que handleSaveAsset sepa qué actualizar
-        await onSave(isEdit ? 'update' : 'create', { ...payload, id: asset.id });
+      let error;
+      if (isEditing) {
+        // ACTUALIZAR
+        const { error: updateError } = await supabase
+          .from('assets')
+          .update(payload)
+          .eq('id', asset.id);
+        error = updateError;
       } else {
-        // 🅱️ MODO NUEVO (Dashboard Staff) - Guardamos directo
-        if (isEdit) {
-          const { error } = await supabase.from('assets').update(payload).eq('id', asset.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('assets').insert([payload]);
-          if (error) throw error;
-        }
+        // CREAR NUEVO
+        const { error: createError } = await supabase
+          .from('assets')
+          .insert([payload]);
+        error = createError;
       }
-      
-      // 3. Finalizar
-      if (onUpdate) await onUpdate(); // Refrescar lista si existe el método
-      onClose();
 
+      if (error) throw error;
+
+      alert(isEditing ? '✅ Activo actualizado' : '✅ Activo creado');
+      onUpdate();
+      onClose();
     } catch (e: any) {
-      console.error(e);
-      alert('Error al guardar: ' + e.message);
+      alert('Error: ' + e.message);
     } finally {
-      setInternalLoading(false);
+      setLoading(false);
     }
   };
 
   if (!isOpen) return null;
 
-  // Loading unificado (interno o externo)
-  const isLoading = internalLoading || isProcessing;
-
   return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex justify-end transition-all">
-      <div className="w-full max-w-2xl bg-slate-50 h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
         
-        {/* HEADER */}
-        <div className="bg-[#0a1e3f] p-8 flex justify-between items-center shrink-0">
+        {/* Header */}
+        <div className="bg-[#0a1e3f] p-6 flex justify-between items-center text-white">
           <div>
-            <div className="bg-[#10b981] w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20 mb-3">
-               <Package size={24} className="text-white" />
-            </div>
-            <h2 className="text-xl font-black text-white uppercase tracking-tight">
-              {asset?.id && asset.id !== 'new' ? 'Detalle Técnico del Activo' : 'Nuevo Activo'}
+            <h2 className="text-xl font-black uppercase tracking-tight">
+              {isEditing ? 'Editar Activo' : 'Nuevo Activo'}
             </h2>
-            <p className="text-[#10b981] text-[10px] font-black uppercase tracking-widest mt-1">
-              Gestión de Inventario Corporativo
-            </p>
+            <p className="text-emerald-400 text-xs font-bold uppercase">Gestión de Inventario</p>
           </div>
-          <button onClick={onClose} className="text-white/50 hover:text-white transition-colors">
-            <X size={28} />
-          </button>
+          <button onClick={onClose} className="bg-white/10 p-2 rounded-xl hover:bg-white/20 transition-all"><X size={20}/></button>
         </div>
 
-        {/* BODY */}
-        <div className="p-8 overflow-y-auto flex-1 space-y-6">
-            
-            {/* Solo mostrar referencia si es edición */}
-            {asset?.id && asset.id !== 'new' && (
-                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-                    <div className="bg-slate-50 p-3 rounded-xl text-slate-400">
-                        <FileText size={20}/>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Referencia Original</p>
-                        <p className="text-sm font-black text-slate-700 uppercase italic">{asset.cliente_nombre || 'Sin Referencia'}</p>
-                    </div>
-                </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-6">
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Tag size={12}/> Identificador ID
-                    </label>
-                    <input 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                        value={formData.identificador || ''}
-                        onChange={e => setFormData({...formData, identificador: e.target.value})}
-                    />
-                </div>
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Hash size={12}/> Número de Serie
-                    </label>
-                    <input 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                        value={formData.serie || ''}
-                        onChange={e => setFormData({...formData, serie: e.target.value})}
-                    />
-                </div>
-            </div>
-
+        {/* Formulario */}
+        <div className="p-8 space-y-4 overflow-y-auto max-h-[70vh]">
+          
+          {/* Nombre y Serie */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                    <Package size={12}/> Nombre del Activo / Equipo
-                </label>
-                <input 
-                    className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-sm font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                    value={formData.nombre_activo || ''}
-                    onChange={e => setFormData({...formData, nombre_activo: e.target.value})}
-                />
-            </div>
-
-            {/* DROPDOWN DE CLIENTES */}
-            <div className="bg-emerald-50/50 p-6 rounded-3xl border border-emerald-100">
-                <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <Building2 size={12}/> Vincular con Cliente Oficial
-                </label>
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Nombre del Equipo</label>
                 <div className="relative">
-                    <select 
-                        className="w-full bg-white border border-emerald-200 rounded-xl px-4 py-4 text-xs font-black text-[#0a1e3f] outline-none appearance-none cursor-pointer uppercase shadow-sm"
-                        value={formData.selectedClientId || ''}
-                        onChange={e => setFormData({...formData, selectedClientId: e.target.value})}
-                    >
-                        <option value="">-- SELECCIONAR CLIENTE --</option>
-                        {clients.map((c: any) => (
-                            <option key={c.id} value={c.id}>
-                                {c.organization?.toUpperCase()}
-                            </option>
-                        ))}
-                    </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-600">
-                        <CheckCircle2 size={16} />
-                    </div>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <CheckCircle2 size={12}/> Estatus Operativo
-                    </label>
-                    <select 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none cursor-pointer uppercase"
-                        value={formData.estatus || 'ACTIVO'}
-                        onChange={e => setFormData({...formData, estatus: e.target.value})}
-                    >
-                        <option value="ACTIVO">ACTIVO</option>
-                        <option value="INACTIVO">INACTIVO</option>
-                        <option value="BAJA">BAJA</option>
-                        <option value="MANTENIMIENTO">EN MANTENIMIENTO</option>
-                    </select>
-                </div>
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <MapPin size={12}/> Ubicación / Detalles
-                    </label>
+                    <Box size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                     <input 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                        placeholder="N/A"
-                        value={formData.ubicacion || ''}
-                        onChange={e => setFormData({...formData, ubicacion: e.target.value})}
+                        type="text" 
+                        value={formData.nombre_activo}
+                        onChange={(e) => setFormData({...formData, nombre_activo: e.target.value})}
+                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
+                        placeholder="Ej: Laptop Dell Latitude"
                     />
                 </div>
             </div>
+            <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Número de Serie</label>
+                <div className="relative">
+                    <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input 
+                        type="text" 
+                        value={formData.serial_number}
+                        onChange={(e) => setFormData({...formData, serial_number: e.target.value})}
+                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
+                        placeholder="Ej: SN-55443322"
+                    />
+                </div>
+            </div>
+          </div>
+
+          {/* Modelo y Ubicación */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Modelo / Marca</label>
+                <div className="relative">
+                    <Cpu size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input 
+                        type="text" 
+                        value={formData.modelo}
+                        onChange={(e) => setFormData({...formData, modelo: e.target.value})}
+                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
+                        placeholder="Ej: Dell 5420"
+                    />
+                </div>
+            </div>
+            <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Ubicación Física</label>
+                <div className="relative">
+                    <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input 
+                        type="text" 
+                        value={formData.ubicacion}
+                        onChange={(e) => setFormData({...formData, ubicacion: e.target.value})}
+                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
+                        placeholder="Ej: Oficina Central - Piso 2"
+                    />
+                </div>
+            </div>
+          </div>
+
+          {/* Cliente y Estado */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Cliente Asignado</label>
+                <select
+                    value={formData.client_id}
+                    onChange={(e) => setFormData({...formData, client_id: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 uppercase cursor-pointer"
+                >
+                    <option value="">-- SIN ASIGNAR --</option>
+                    {clients.map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.organization}</option>
+                    ))}
+                </select>
+            </div>
+            <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Estado del Activo</label>
+                <div className="relative">
+                    <Activity size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <select
+                        value={formData.status}
+                        onChange={(e) => setFormData({...formData, status: e.target.value})}
+                        className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 uppercase cursor-pointer"
+                    >
+                        <option value="activo">🟢 Activo / Operativo</option>
+                        <option value="mantenimiento">🟠 En Mantenimiento</option>
+                        <option value="baja">🔴 Baja / Inactivo</option>
+                    </select>
+                </div>
+            </div>
+          </div>
+
         </div>
 
-        {/* FOOTER */}
-        <div className="p-8 border-t border-slate-100 bg-white">
+        {/* Footer */}
+        <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+            <button onClick={onClose} className="px-6 py-3 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-200 transition-colors">Cancelar</button>
             <button 
-                onClick={handleSave}
-                disabled={isLoading}
-                className="w-full bg-[#00C897] hover:bg-emerald-400 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex justify-center items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleSave} 
+                disabled={loading}
+                className="bg-[#0a1e3f] hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-black text-xs uppercase shadow-lg flex items-center gap-2 transition-all"
             >
-                {isLoading ? (
-                    <>
-                        <Loader2 size={18} className="animate-spin"/> Procesando...
-                    </>
-                ) : (
-                    <>
-                        <Save size={18} /> Guardar Cambios
-                    </>
-                )}
+                {loading ? <span className="animate-spin">⌛</span> : <Save size={16}/>} Guardar Activo
             </button>
         </div>
-
       </div>
     </div>
   );
