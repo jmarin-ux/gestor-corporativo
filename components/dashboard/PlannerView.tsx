@@ -1,14 +1,20 @@
 'use client';
 
+import { useState } from 'react'; // ✅ Importamos useState
 import { 
   Calendar, Users, ChevronLeft, ChevronRight, 
   Loader2, Plus, X, RefreshCw, ClipboardList, Info, ArrowLeft, MapPin, History, CheckCircle2, Lock, User, HardHat
 } from 'lucide-react';
 import { usePlannerLogic } from './usePlannerLogic';
 import ServiceDetailModal from './ServiceDetailModal'; 
+// ✅ Importamos el nuevo Modal
+import CreateTicketModal from './CreateTicketModal'; 
 
 export default function PlannerView({ currentUser, onBack }: { currentUser: any, onBack?: () => void }) {
   
+  // ✅ Estado para controlar el modal de Autogestión
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
   const {
     loading, saving, leadersList, auxiliariesList, pendingTickets, allStaff,
     selectedLeader, selectedAux, kanbanBoard, 
@@ -82,6 +88,14 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
                   )}
                 </div>
               </div>
+
+              {/* 👇 BOTÓN NUEVA AUTOGESTIÓN (AQUÍ ESTÁ LO NUEVO) */}
+              <button 
+                onClick={() => setIsCreateModalOpen(true)}
+                className="w-full bg-[#00C897] hover:bg-emerald-400 text-[#0a1e3f] py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
+              >
+                <Plus size={18} strokeWidth={3}/> Nueva Autogestión
+              </button>
 
               {/* BANDEJA DE PENDIENTES */}
               <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-100 h-[500px] flex flex-col">
@@ -160,7 +174,7 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
         </div>
       </div>
 
-      {/* MODAL COMPLETO DE DETALLE (Solo este, el simple ya no existe) */}
+      {/* MODAL COMPLETO DE DETALLE */}
       {detailModalOpen && selectedTicketForDetail && (
         <ServiceDetailModal 
             isOpen={true} 
@@ -169,6 +183,18 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
             staff={allStaff}
             onClose={() => closeDetailModal(false)} 
             onUpdate={() => closeDetailModal(true)} 
+        />
+      )}
+
+      {/* ✅ MODAL DE AUTOGESTIÓN */}
+      {isCreateModalOpen && (
+        <CreateTicketModal 
+          isOpen={true}
+          onClose={() => setIsCreateModalOpen(false)}
+          currentUser={currentUser}
+          onSuccess={() => {
+            loadData(); // Recargamos el tablero al crear
+          }}
         />
       )}
     </div>

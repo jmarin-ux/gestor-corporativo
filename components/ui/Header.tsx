@@ -1,9 +1,10 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { LogOut, ChevronDown } from 'lucide-react'
+import { LogOut, ChevronDown, Camera } from 'lucide-react' // ✅ Camera importada
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase-browser'
+import AttendanceModal from '@/components/dashboard/AttendanceModal' // ✅ Importar Modal
 
 interface UserSession {
   id: string
@@ -16,11 +17,7 @@ interface HeaderProps {
   user?: UserSession
   currentRole?: string
   onChangeRole?: (role: string) => void
-
-  // Si se pasa, se ejecuta esto ADEMÁS de la limpieza estándar (opcional)
   onLogout?: () => void | Promise<void>
-
-  // A dónde mandar después del logout (por defecto /login)
   logoutRedirectTo?: string
 }
 
@@ -32,8 +29,11 @@ export default function Header({
   logoutRedirectTo = '/login',
 }: HeaderProps) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const router = useRouter() // Lo dejamos instanciado por si acaso, pero usaremos window.location
+  const router = useRouter() 
   const [localUser, setLocalUser] = useState<UserSession | null>(null)
+  
+  // ✅ Estado para controlar el modal de asistencia
+  const [showAttendance, setShowAttendance] = useState(false)
 
   // 🔐 BOOT DE IDENTIDAD — Recuperación de sesión local
   useEffect(() => {
@@ -68,29 +68,18 @@ export default function Header({
 
   // --- LÓGICA DE LOGOUT ROBUSTA ---
   const handleLogout = async () => {
-    // 1. Confirmación de seguridad
     if (!window.confirm("¿Estás seguro de que deseas cerrar sesión?")) return
 
     try {
-      // 2. Ejecutar prop personalizada si existe (limpiezas específicas del padre)
       if (onLogout) {
         await onLogout()
       }
-
-      // 3. Cerrar sesión en Supabase (Backend)
-      // Incluso si falla (ej. sin internet), debemos proceder a limpiar localmente
       await supabase.auth.signOut()
     } catch (error) {
       console.error("Error al cerrar sesión en Supabase:", error)
     } finally {
-      // 4. LIMPIEZA TOTAL (Vital para romper bucles y borrar datos sensibles)
-      // Borra 'staff_user', 'kiosco_device_user', tokens, etc.
       localStorage.clear()
-      sessionStorage.clear() // Limpiamos sessionStorage también por seguridad
-
-      // 5. Redirección Forzada (Hard Reload)
-      // Usamos window.location.href en lugar de router.push para forzar
-      // que se limpie cualquier estado en memoria de React/Next.js
+      sessionStorage.clear() 
       window.location.href = logoutRedirectTo
     }
   }
@@ -99,7 +88,6 @@ export default function Header({
 
   const activeUser = propUser || localUser
 
-  // Si no hay usuario cargado aún, mostramos header vacío o skeleton
   if (!activeUser) {
     return (
       <header className="fixed left-0 right-0 top-0 z-[100] flex h-16 items-center justify-between border-b border-slate-200 bg-white/90 px-6 backdrop-blur-md shadow-sm" />
@@ -120,7 +108,6 @@ export default function Header({
 
   const roleKey = ((propRole || activeUser.role || 'invitado') as string).toLowerCase()
 
-  // Iniciales para el avatar
   const initials =
     activeUser.full_name
       ?.split(' ')
@@ -139,74 +126,100 @@ export default function Header({
   ]
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-[100] flex h-16 items-center justify-between border-b border-slate-200 bg-white/90 px-6 backdrop-blur-md shadow-sm">
-      {/* LOGO */}
-      <div className="flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#00C897] shadow-lg shadow-[#00C897]/20">
-          <span className="text-xs font-black text-white">W</span>
+    <>
+        <header className="fixed left-0 right-0 top-0 z-[100] flex h-16 items-center justify-between border-b border-slate-200 bg-white/90 px-6 backdrop-blur-md shadow-sm">
+        {/* LOGO */}
+        <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#00C897] shadow-lg shadow-[#00C897]/20">
+            <span className="text-xs font-black text-white">W</span>
+            </div>
+            <div className="hidden md:block leading-none">
+            <span className="block text-sm font-black uppercase tracking-[0.2em] text-slate-700">
+                WUOTTO
+            </span>
+            <span className="mt-0.5 block text-[9px] font-bold uppercase tracking-widest text-[#00C897]">
+                SERVICES
+            </span>
+            </div>
         </div>
-        <div className="hidden md:block leading-none">
-          <span className="block text-sm font-black uppercase tracking-[0.2em] text-slate-700">
-            WUOTTO
-          </span>
-          <span className="mt-0.5 block text-[9px] font-bold uppercase tracking-widest text-[#00C897]">
-            SERVICES
-          </span>
-        </div>
-      </div>
 
-      <div className="flex items-center gap-6">
-        {/* Selector de rol (solo visible para admin/superadmin y si no es cliente) */}
-        {!isClient && isPrivileged && onChangeRole ? (
-          <div className="relative hidden sm:flex items-center">
-            <select
-              value={roleKey}
-              onChange={(e) => onChangeRole(e.target.value)}
-              className="appearance-none rounded-full border border-slate-200 bg-slate-50 pl-4 pr-8 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600 outline-none hover:border-[#00C897] cursor-pointer"
+        <div className="flex items-center gap-6">
+            
+            {/* 👇 BOTÓN DE ASISTENCIA (NUEVO) */}
+            {!isClient && (
+                <button 
+                    onClick={() => setShowAttendance(true)}
+                    className="hidden sm:flex items-center gap-2 bg-[#0a1e3f] text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-md active:scale-95"
+                >
+                    <Camera size={14} /> Asistencia
+                </button>
+            )}
+
+            {/* Selector de rol */}
+            {!isClient && isPrivileged && onChangeRole ? (
+            <div className="relative hidden sm:flex items-center">
+                <select
+                value={roleKey}
+                onChange={(e) => onChangeRole(e.target.value)}
+                className="appearance-none rounded-full border border-slate-200 bg-slate-50 pl-4 pr-8 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600 outline-none hover:border-[#00C897] cursor-pointer"
+                >
+                {availableRoles.map((r) => (
+                    <option key={r.key} value={r.key}>
+                    {r.label}
+                    </option>
+                ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-3 text-slate-400 pointer-events-none" />
+            </div>
+            ) : (
+            <div className="hidden sm:flex items-center">
+                <span className="inline-block text-[9px] font-black uppercase tracking-widest text-[#00C897] bg-[#00C897]/10 px-3 py-1 rounded-full">
+                {(isClient ? 'CLIENTE' : roleKey).toUpperCase()}
+                </span>
+            </div>
+            )}
+
+            {/* Información del Usuario */}
+            <div className="flex h-8 items-center gap-3 border-l border-slate-200 pl-6">
+            <div className="hidden text-right sm:block">
+                <p className="text-xs font-bold leading-none text-slate-700 truncate max-w-[150px]">
+                {activeUser.full_name}
+                </p>
+                {/* Botón móvil de asistencia (solo visible en pantallas pequeñas) */}
+                <button 
+                    onClick={() => setShowAttendance(true)}
+                    className="sm:hidden mt-1 text-[9px] font-black uppercase tracking-widest text-[#00C897] flex items-center justify-end gap-1"
+                >
+                    <Camera size={10} /> Marcar Asistencia
+                </button>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-black text-slate-600 shadow-sm border border-slate-100">
+                {initials}
+            </div>
+            </div>
+
+            {/* Botón de Logout */}
+            <button
+            onClick={handleLogout}
+            className="group flex items-center gap-2 text-slate-400 hover:text-red-500 transition-colors"
+            title="Cerrar Sesión"
             >
-              {availableRoles.map((r) => (
-                <option key={r.key} value={r.key}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={12} className="absolute right-3 text-slate-400 pointer-events-none" />
-          </div>
-        ) : (
-          /* Etiqueta estática de rol para usuarios normales */
-          <div className="hidden sm:flex items-center">
-            <span className="inline-block text-[9px] font-black uppercase tracking-widest text-[#00C897] bg-[#00C897]/10 px-3 py-1 rounded-full">
-              {(isClient ? 'CLIENTE' : roleKey).toUpperCase()}
-            </span>
-          </div>
-        )}
-
-        {/* Información del Usuario */}
-        <div className="flex h-8 items-center gap-3 border-l border-slate-200 pl-6">
-          <div className="hidden text-right sm:block">
-            <p className="text-xs font-bold leading-none text-slate-700 truncate max-w-[150px]">
-              {activeUser.full_name}
-            </p>
-            <span className="mt-1 inline-block text-[9px] font-black uppercase tracking-widest text-[#00C897] bg-[#00C897]/10 px-2 py-0.5 rounded-full">
-              {(isClient ? 'CLIENTE' : roleKey).toUpperCase()}
-            </span>
-          </div>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-black text-slate-600 shadow-sm border border-slate-100">
-            {initials}
-          </div>
+            <div className="rounded-full p-2 group-hover:bg-red-50 transition-colors">
+                <LogOut size={18} strokeWidth={2.5} />
+            </div>
+            </button>
         </div>
+        </header>
 
-        {/* Botón de Logout */}
-        <button
-          onClick={handleLogout}
-          className="group flex items-center gap-2 text-slate-400 hover:text-red-500 transition-colors"
-          title="Cerrar Sesión"
-        >
-          <div className="rounded-full p-2 group-hover:bg-red-50 transition-colors">
-            <LogOut size={18} strokeWidth={2.5} />
-          </div>
-        </button>
-      </div>
-    </header>
+        {/* 👇 MODAL DE ASISTENCIA RENDERIZADO AQUÍ */}
+        {showAttendance && (
+            <AttendanceModal
+                isOpen={true}
+                onClose={() => setShowAttendance(false)}
+                currentUser={activeUser}
+                type="ENTRADA" // Puedes personalizar esto o dejar que el modal decida
+            />
+        )}
+    </>
   )
 }

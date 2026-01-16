@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Zap, Users, Building2, Search, RefreshCw,
   DollarSign, UserPlus, Calendar as CalendarIcon, 
-  Database, LayoutGrid, Check, X
+  Database, LayoutGrid, Check, X, Clock // ✅ Clock añadido
 } from 'lucide-react';
 
 // --- IMPORTACIONES DE COMPONENTES ---
@@ -15,6 +15,7 @@ import ClientsSection from './ClientsSection';
 import AssetsTab from '../AssetsTab';
 import PlannerView from '@/components/dashboard/PlannerView';
 import ServiceDetailModal from '@/components/dashboard/ServiceDetailModal';
+import AttendanceView from './AttendanceView'; // ✅ Vista de Asistencia añadida
 import Header from '@/components/ui/Header';
 
 interface SuperAdminViewProps {
@@ -36,7 +37,8 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
   });
 
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'ops' | 'staff' | 'clients' | 'planner' | 'assets' | 'requests'>('ops');
+  // ✅ Añadido 'attendance' al tipo del estado tab
+  const [tab, setTab] = useState<'ops' | 'staff' | 'clients' | 'planner' | 'assets' | 'requests' | 'attendance'>('ops');
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
 
   const [filters, setFilters] = useState({
@@ -168,6 +170,7 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
             {[
               { id: 'ops', icon: Zap, label: 'Operaciones' },
               { id: 'planner', icon: CalendarIcon, label: 'Planificador' },
+              { id: 'attendance', icon: Clock, label: 'Asistencia' }, // ✅ Pestaña Asistencia
               { id: 'requests', icon: UserPlus, label: `Solicitudes (${data.requests.length})` },
               { id: 'staff', icon: Users, label: 'Personal' },
               { id: 'assets', icon: Database, label: 'Activos' },
@@ -274,6 +277,11 @@ export default function SuperAdminView({ currentUser }: SuperAdminViewProps) {
             {/* 6. CLIENTES */}
             {tab === 'clients' && (
                 <ClientsSection currentUser={currentUser} />
+            )}
+
+            {/* 7. ASISTENCIA (NUEVO) */}
+            {tab === 'attendance' && (
+                <AttendanceView />
             )}
 
           </div>

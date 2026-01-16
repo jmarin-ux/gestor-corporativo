@@ -1,203 +1,281 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Save, Box, Hash, Cpu, MapPin, Activity } from 'lucide-react';
+import { X, Save, Tag, Hash, Building2, MapPin, FileText, CheckCircle2, Package, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 
 interface EditAssetModalProps {
   isOpen: boolean;
-  onClose: () => void;
-  asset: any; // Si viene vacío es creación, si tiene datos es edición
+  asset: any;
   clients: any[];
-  onUpdate: () => void;
+  onClose: () => void;
+  
+  // Soporte dual para Dashboard nuevo y vista legacy
+  onUpdate?: () => void | Promise<void>; 
+  onSave?: (action: string, assetData: any) => void | Promise<void>; 
+  isProcessing?: boolean; 
 }
 
-export default function EditAssetModal({ isOpen, onClose, asset, clients, onUpdate }: EditAssetModalProps) {
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    nombre_activo: '',
-    serial_number: '',
-    modelo: '',
-    ubicacion: '',
-    status: 'activo',
-    client_id: '',
-  });
-
-  const isEditing = asset && asset.id;
+export default function EditAssetModal({ 
+  isOpen, 
+  asset, 
+  clients = [], 
+  onClose, 
+  onUpdate, 
+  onSave, 
+  isProcessing = false 
+}: EditAssetModalProps) {
+  
+  const [formData, setFormData] = useState<any>({});
+  const [internalLoading, setInternalLoading] = useState(false);
 
   useEffect(() => {
-    if (asset) {
-      setFormData({
-        nombre_activo: asset.nombre_activo || '',
-        serial_number: asset.serial_number || '',
-        modelo: asset.modelo || '',
-        ubicacion: asset.ubicacion || '',
-        status: asset.status || 'activo',
-        client_id: asset.client_id || '',
+    if (!isOpen) return;
+
+    if (asset?.id && asset.id !== 'new') {
+      // MODO EDICIÓN
+      // Intentamos encontrar el cliente por nombre si no tenemos ID
+      const matchingClient = clients.find((c: any) => 
+        c.organization?.toUpperCase() === asset.cliente_nombre?.toUpperCase()
+      );
+
+      setFormData((prev: any) => {
+        const isSameAsset = prev?.id === asset.id;
+        
+        return {
+          ...asset,
+          // Si ya seleccionamos uno manualmente, lo mantenemos. Si no, usamos el match.
+          selectedClientId: (isSameAsset && prev?.selectedClientId) 
+            ? prev.selectedClientId 
+            : (asset.client_id || (matchingClient ? matchingClient.id : ''))
+        };
+      });
+
+    } else {
+      // MODO CREACIÓN
+      setFormData({ 
+          estatus: 'ACTIVO',
+          identificador: '',
+          serie: '',
+          nombre_activo: '',
+          cliente_nombre: '',
+          ubicacion: '',
+          detalles: '',
+          selectedClientId: ''
       });
     }
-  }, [asset]);
+  }, [isOpen, asset, clients]);
 
   const handleSave = async () => {
-    if (!formData.nombre_activo) return alert('El nombre del activo es obligatorio');
-    
-    setLoading(true);
+    setInternalLoading(true);
     try {
-      const payload = { ...formData };
-
-      let error;
-      if (isEditing) {
-        // ACTUALIZAR
-        const { error: updateError } = await supabase
-          .from('assets')
-          .update(payload)
-          .eq('id', asset.id);
-        error = updateError;
+      // 1. Resolver el nombre del cliente basado en el ID seleccionado
+      let finalClientName = formData.cliente_nombre;
+      let finalClientId = formData.selectedClientId; // Guardamos el ID real también
+      
+      if (formData.selectedClientId) {
+        const officialClient = clients.find((c: any) => c.id.toString() === formData.selectedClientId.toString());
+        if (officialClient) {
+            finalClientName = officialClient.organization;
+        }
       } else {
-        // CREAR NUEVO
-        const { error: createError } = await supabase
-          .from('assets')
-          .insert([payload]);
-        error = createError;
+        finalClientId = null; // Si selecciona "-- SIN ASIGNAR --"
       }
 
-      if (error) throw error;
+      const payload = {
+        identificador: formData.identificador,
+        serie: formData.serie,
+        nombre_activo: formData.nombre_activo,
+        cliente_nombre: finalClientName,
+        client_id: finalClientId, // Importante guardar la relación real
+        ubicacion: formData.ubicacion,
+        detalles: formData.detalles,
+        estatus: formData.estatus
+      };
 
-      alert(isEditing ? '✅ Activo actualizado' : '✅ Activo creado');
-      onUpdate();
+      const isEdit = asset?.id && asset.id !== 'new';
+
+      if (onSave) {
+        // MODO LEGACY (Delegado al padre)
+        await onSave(isEdit ? 'update' : 'create', { ...payload, id: asset.id });
+      } else {
+        // MODO DIRECTO (Supabase)
+        if (isEdit) {
+          const { error } = await supabase.from('assets').update(payload).eq('id', asset.id);
+          if (error) throw error;
+        } else {
+          // Generar ID temporal si no existe lógica de backend
+          const insertPayload = { ...payload };
+          if (!insertPayload.identificador) insertPayload.identificador = `NEW-${Date.now()}`;
+          
+          const { error } = await supabase.from('assets').insert([insertPayload]);
+          if (error) throw error;
+        }
+      }
+      
+      if (onUpdate) await onUpdate(); 
       onClose();
+
     } catch (e: any) {
-      alert('Error: ' + e.message);
+      console.error(e);
+      alert('Error al guardar: ' + e.message);
     } finally {
-      setLoading(false);
+      setInternalLoading(false);
     }
   };
 
   if (!isOpen) return null;
 
+  const isLoading = internalLoading || isProcessing;
+
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex justify-end transition-all">
+      <div className="w-full max-w-2xl bg-slate-50 h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
         
-        {/* Header */}
-        <div className="bg-[#0a1e3f] p-6 flex justify-between items-center text-white">
+        {/* HEADER */}
+        <div className="bg-[#0a1e3f] p-8 flex justify-between items-center shrink-0">
           <div>
-            <h2 className="text-xl font-black uppercase tracking-tight">
-              {isEditing ? 'Editar Activo' : 'Nuevo Activo'}
+            <div className="bg-[#10b981] w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20 mb-3">
+               <Package size={24} className="text-white" />
+            </div>
+            <h2 className="text-xl font-black text-white uppercase tracking-tight">
+              {asset?.id && asset.id !== 'new' ? 'Detalle Técnico del Activo' : 'Nuevo Activo'}
             </h2>
-            <p className="text-emerald-400 text-xs font-bold uppercase">Gestión de Inventario</p>
+            <p className="text-[#10b981] text-[10px] font-black uppercase tracking-widest mt-1">
+              Gestión de Inventario Corporativo
+            </p>
           </div>
-          <button onClick={onClose} className="bg-white/10 p-2 rounded-xl hover:bg-white/20 transition-all"><X size={20}/></button>
+          <button onClick={onClose} className="text-white/50 hover:text-white transition-colors">
+            <X size={28} />
+          </button>
         </div>
 
-        {/* Formulario */}
-        <div className="p-8 space-y-4 overflow-y-auto max-h-[70vh]">
-          
-          {/* Nombre y Serie */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Nombre del Equipo</label>
-                <div className="relative">
-                    <Box size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                    <input 
-                        type="text" 
-                        value={formData.nombre_activo}
-                        onChange={(e) => setFormData({...formData, nombre_activo: e.target.value})}
-                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
-                        placeholder="Ej: Laptop Dell Latitude"
-                    />
+        {/* BODY */}
+        <div className="p-8 overflow-y-auto flex-1 space-y-6">
+            
+            {/* Referencia visual */}
+            {asset?.id && asset.id !== 'new' && (
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                    <div className="bg-slate-50 p-3 rounded-xl text-slate-400">
+                        <FileText size={20}/>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Organización Actual</p>
+                        <p className="text-sm font-black text-slate-700 uppercase italic">{asset.cliente_nombre || 'Sin Asignar'}</p>
+                    </div>
                 </div>
-            </div>
-            <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Número de Serie</label>
-                <div className="relative">
-                    <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                    <input 
-                        type="text" 
-                        value={formData.serial_number}
-                        onChange={(e) => setFormData({...formData, serial_number: e.target.value})}
-                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
-                        placeholder="Ej: SN-55443322"
-                    />
-                </div>
-            </div>
-          </div>
+            )}
 
-          {/* Modelo y Ubicación */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Modelo / Marca</label>
-                <div className="relative">
-                    <Cpu size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+            <div className="grid grid-cols-2 gap-6">
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <Tag size={12}/> Identificador ID
+                    </label>
                     <input 
-                        type="text" 
-                        value={formData.modelo}
-                        onChange={(e) => setFormData({...formData, modelo: e.target.value})}
-                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
-                        placeholder="Ej: Dell 5420"
+                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
+                        value={formData.identificador || ''}
+                        onChange={e => setFormData({...formData, identificador: e.target.value})}
+                        placeholder="EJ: LP-001"
+                    />
+                </div>
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <Hash size={12}/> Número de Serie
+                    </label>
+                    <input 
+                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
+                        value={formData.serie || ''}
+                        onChange={e => setFormData({...formData, serie: e.target.value})}
+                        placeholder="S/N..."
                     />
                 </div>
             </div>
-            <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Ubicación Física</label>
-                <div className="relative">
-                    <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                    <input 
-                        type="text" 
-                        value={formData.ubicacion}
-                        onChange={(e) => setFormData({...formData, ubicacion: e.target.value})}
-                        className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold outline-none uppercase focus:border-emerald-500"
-                        placeholder="Ej: Oficina Central - Piso 2"
-                    />
-                </div>
-            </div>
-          </div>
 
-          {/* Cliente y Estado */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Cliente Asignado</label>
-                <select
-                    value={formData.client_id}
-                    onChange={(e) => setFormData({...formData, client_id: e.target.value})}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 uppercase cursor-pointer"
-                >
-                    <option value="">-- SIN ASIGNAR --</option>
-                    {clients.map((c: any) => (
-                        <option key={c.id} value={c.id}>{c.organization}</option>
-                    ))}
-                </select>
-            </div>
             <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-1 block">Estado del Activo</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <Package size={12}/> Nombre del Activo / Equipo
+                </label>
+                <input 
+                    className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-sm font-black text-[#0a1e3f] outline-none transition-all uppercase"
+                    value={formData.nombre_activo || ''}
+                    onChange={e => setFormData({...formData, nombre_activo: e.target.value})}
+                    placeholder="EJ: LAPTOP DELL LATITUDE"
+                />
+            </div>
+
+            {/* SELECTOR DE CLIENTES */}
+            <div className="bg-emerald-50/50 p-6 rounded-3xl border border-emerald-100">
+                <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <Building2 size={12}/> Vincular con Cliente Oficial
+                </label>
                 <div className="relative">
-                    <Activity size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                    <select
-                        value={formData.status}
-                        onChange={(e) => setFormData({...formData, status: e.target.value})}
-                        className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-3 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 uppercase cursor-pointer"
+                    <select 
+                        className="w-full bg-white border border-emerald-200 rounded-xl px-4 py-4 text-xs font-black text-[#0a1e3f] outline-none appearance-none cursor-pointer uppercase shadow-sm"
+                        value={formData.selectedClientId || ''}
+                        onChange={e => setFormData({...formData, selectedClientId: e.target.value})}
                     >
-                        <option value="activo">🟢 Activo / Operativo</option>
-                        <option value="mantenimiento">🟠 En Mantenimiento</option>
-                        <option value="baja">🔴 Baja / Inactivo</option>
+                        <option value="">-- SIN ASIGNAR (Inventario Interno) --</option>
+                        {clients.map((c: any) => (
+                            <option key={c.id} value={c.id}>
+                                {c.organization?.toUpperCase()}
+                            </option>
+                        ))}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-600">
+                        <CheckCircle2 size={16} />
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <CheckCircle2 size={12}/> Estatus Operativo
+                    </label>
+                    <select 
+                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none cursor-pointer uppercase"
+                        value={formData.estatus || 'ACTIVO'}
+                        onChange={e => setFormData({...formData, estatus: e.target.value})}
+                    >
+                        <option value="ACTIVO">ACTIVO</option>
+                        <option value="INACTIVO">INACTIVO</option>
+                        <option value="BAJA">BAJA</option>
+                        <option value="MANTENIMIENTO">EN MANTENIMIENTO</option>
                     </select>
                 </div>
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <MapPin size={12}/> Ubicación / Detalles
+                    </label>
+                    <input 
+                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
+                        placeholder="N/A"
+                        value={formData.ubicacion || ''}
+                        onChange={e => setFormData({...formData, ubicacion: e.target.value})}
+                    />
+                </div>
             </div>
-          </div>
-
         </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-            <button onClick={onClose} className="px-6 py-3 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-200 transition-colors">Cancelar</button>
+        {/* FOOTER */}
+        <div className="p-8 border-t border-slate-100 bg-white">
             <button 
-                onClick={handleSave} 
-                disabled={loading}
-                className="bg-[#0a1e3f] hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-black text-xs uppercase shadow-lg flex items-center gap-2 transition-all"
+                onClick={handleSave}
+                disabled={isLoading}
+                className="w-full bg-[#00C897] hover:bg-emerald-400 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex justify-center items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-                {loading ? <span className="animate-spin">⌛</span> : <Save size={16}/>} Guardar Activo
+                {isLoading ? (
+                    <>
+                        <Loader2 size={18} className="animate-spin"/> Procesando...
+                    </>
+                ) : (
+                    <>
+                        <Save size={18} /> Guardar Cambios
+                    </>
+                )}
             </button>
         </div>
+
       </div>
     </div>
   );
