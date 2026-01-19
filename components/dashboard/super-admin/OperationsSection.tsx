@@ -4,23 +4,28 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabase-browser'; 
 import { 
   TrendingUp, MapPin, MoreHorizontal, UserCheck, HardHat, 
-  RefreshCw, Download, Loader2
+  RefreshCw, Download, Loader2, Plus 
 } from 'lucide-react';
-// Asegúrate de que esta ruta sea correcta según tu estructura
 import ServiceDetailModal from '@/components/dashboard/ServiceDetailModal'; 
+// 👇 IMPORTANTE: Importamos el modal de creación
+import CreateTicketModal from '@/components/dashboard/CreateTicketModal'; 
 
-// 👇 PARCHE PARA VERCEL: Interface flexible
+// 👇 Agregamos currentUser a la interfaz para que TypeScript no se queje
 interface OperationsSectionProps {
   tickets: any[];
   profiles: any[];
   clients: any[];
   refresh: () => void;
+  currentUser: any; // <--- CLAVE PARA QUE GUARDE QUIÉN CREÓ
   [key: string]: any;
 }
 
-export default function OperationsSection({ tickets, profiles, clients, refresh }: OperationsSectionProps) {
+export default function OperationsSection({ tickets, profiles, clients, refresh, currentUser }: OperationsSectionProps) {
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  
+  // 👇 Estado para controlar el modal de creación
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const totalTickets = tickets?.length || 0;
   const closedTickets = tickets?.filter((t: any) => t.status === 'Cerrado').length || 0;
@@ -39,10 +44,12 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
     setProcessingId(id);
     const valToSend = value === "" ? null : value;
     
+    // Mapeo seguro de campos (DB vs Frontend)
     const targetField = field === 'coordinador_id' ? 'coordinator_id' : field;
     
     const updates: any = { [targetField]: valToSend };
     
+    // Si asignamos coordinador, cambiamos estado automáticamente
     if (targetField === 'coordinator_id' && valToSend) {
       updates.status = 'Asignado'; 
     }
@@ -85,6 +92,14 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
                 <p className="text-blue-300 text-[10px] font-bold mt-2 uppercase">Eficiencia Operativa</p>
             </div>
             <div className="flex gap-2">
+                {/* 👇 BOTÓN NUEVO TICKET (Faltaba en tu código anterior) */}
+                <button 
+                    onClick={() => setIsCreateModalOpen(true)}
+                    className="bg-[#00C897] hover:bg-[#00b085] text-[#0a1e3f] p-4 rounded-2xl transition-all font-bold flex items-center gap-2"
+                >
+                    <Plus size={24}/> <span className="hidden md:inline">NUEVO TICKET</span>
+                </button>
+
                 <button onClick={handleExport} className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl transition-all" title="Descargar"><Download size={24}/></button>
                 <button onClick={refresh} className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl transition-all" title="Refrescar"><RefreshCw size={24}/></button>
             </div>
@@ -161,16 +176,25 @@ export default function OperationsSection({ tickets, profiles, clients, refresh 
             </div>
         </div>
 
-        {/* ✅ MODAL CORREGIDO: isOpen + onClose */}
+        {/* MODAL DETALLE */}
         {selectedTicket && (
             <ServiceDetailModal 
-                isOpen={true} // OBLIGATORIO
+                isOpen={true} 
                 ticket={selectedTicket} 
-                currentUser={{role:'superadmin'}} 
-                onClose={() => setSelectedTicket(null)} // Nombre correcto: onClose
+                currentUser={currentUser} 
+                onClose={() => setSelectedTicket(null)} 
                 onUpdate={refresh} 
             />
         )}
+
+        {/* 👇 MODAL DE CREACIÓN (Conectado con currentUser) */}
+        <CreateTicketModal
+            isOpen={isCreateModalOpen}
+            onClose={() => setIsCreateModalOpen(false)}
+            onSuccess={refresh}
+            currentUser={currentUser} // <--- AQUÍ SE ENVÍA EL USUARIO
+            client={null} 
+        />
     </div>
   );
 }

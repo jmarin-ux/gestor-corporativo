@@ -21,7 +21,7 @@ export default function AttendanceView() {
 
   // --- ESTADOS DE FILTRO ---
   const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('hoy'); // 'hoy', 'semana', 'quincena', 'mes', 'custom'
+  const [selectedPreset, setSelectedPreset] = useState('hoy'); 
 
   // Fechas en formato string YYYY-MM-DD
   const [startDate, setStartDate] = useState<string>('');
@@ -42,10 +42,9 @@ export default function AttendanceView() {
     init();
   }, []);
 
-  // 2. LÓGICA DE PRESETS (QUINCENA, SEMANA, ETC)
+  // 2. LÓGICA DE PRESETS
   const applyPreset = (preset: string) => {
       const now = new Date();
-      // Ajuste para trabajar con fechas locales limpias
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       
       let start = new Date(today);
@@ -53,25 +52,21 @@ export default function AttendanceView() {
 
       switch (preset) {
           case 'hoy':
-              // Start y End son hoy
               break;
           
           case 'semana':
-              // Lunes a Domingo de la semana actual
-              const day = today.getDay() || 7; // Domingo es 7
+              const day = today.getDay() || 7; 
               if (day !== 1) start.setDate(today.getDate() - (day - 1));
               end.setDate(start.getDate() + 6);
               break;
 
           case 'quincena':
-              // Regla: Día 1-15 (1ra Q) o 16-Fin (2da Q)
               const currentDay = today.getDate();
               if (currentDay <= 15) {
                   start.setDate(1);
                   end.setDate(15);
               } else {
                   start.setDate(16);
-                  // Truco para último día del mes
                   end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
               }
               break;
@@ -82,12 +77,10 @@ export default function AttendanceView() {
               break;
 
           case 'custom':
-              // No cambiamos las fechas, el usuario elige
               setSelectedPreset('custom');
               return;
       }
 
-      // Convertimos a string YYYY-MM-DD local
       const toLocalISO = (d: Date) => {
           const offset = d.getTimezoneOffset() * 60000;
           return new Date(d.getTime() - offset).toISOString().split('T')[0];
@@ -104,16 +97,9 @@ export default function AttendanceView() {
     if (!currentUser || !startDate || !endDate) return;
     setLoading(true);
     
-    // 🔧 CORRECCIÓN DE ZONA HORARIA CRÍTICA
-    // Creamos fechas UTC precisas para cubrir TODO el día local seleccionado
-    
-    // Inicio: Día seleccionado a las 00:00:00 local
+    // Configuración de fechas
     const startObj = new Date(`${startDate}T00:00:00`); 
-    
-    // Fin: Día seleccionado a las 23:59:59.999 local
     const endObj = new Date(`${endDate}T23:59:59.999`);
-
-    // Convertimos a UTC para Supabase
     const startIso = startObj.toISOString();
     const endIso = endObj.toISOString();
 
@@ -127,9 +113,16 @@ export default function AttendanceView() {
       .lte('created_at', endIso)
       .order('created_at', { ascending: true });
 
-    // 🔐 SEGURIDAD: Filtro por Rol
-    const role = (currentUser.role || '').toLowerCase();
-    if (!['admin', 'superadmin'].includes(role)) {
+    // 🔐 SEGURIDAD: LÓGICA DE VISIBILIDAD ACTUALIZADA
+    const role = (currentUser.role || '').toLowerCase().trim();
+    
+    // Lista de roles que tienen PERMISO DE VER TODO
+    // Si agregas nuevos roles de alto nivel (ej. 'rh'), agrégalos aquí.
+    const canViewAll = ['admin', 'superadmin', 'coordinador', 'gerente'];
+
+    // Si el rol del usuario NO está en la lista de privilegiados, forzamos filtro por SU ID.
+    // Esto asegura que 'operativo', 'lider', 'auxiliar', etc., solo vean lo suyo.
+    if (!canViewAll.includes(role)) {
        query = query.eq('user_id', currentUser.id);
     }
 
@@ -138,20 +131,19 @@ export default function AttendanceView() {
 
     const rawLogs = data || [];
 
-    // 🧠 AGRUPACIÓN UNIFICADA (Entrada + Salida)
+    // AGRUPACIÓN (Entrada + Salida)
     const groups: Record<string, any> = {};
 
     rawLogs.forEach((log) => {
-        // Usamos la fecha LOCAL para agrupar visualmente
         const logDateObj = new Date(log.created_at);
-        const logDate = logDateObj.toLocaleDateString('en-CA'); // YYYY-MM-DD local
+        const logDate = logDateObj.toLocaleDateString('en-CA');
         const userId = log.user_id;
         const key = `${userId}_${logDate}`;
 
         if (!groups[key]) {
             groups[key] = {
                 id: key,
-                date: logDate, // Guardamos string fecha para ordenar
+                date: logDate,
                 user: log.profiles,
                 entrada: null,
                 salida: null
@@ -177,7 +169,7 @@ export default function AttendanceView() {
     fetchAndGroupLogs();
   }, [fetchAndGroupLogs]);
 
-  // Sub-componente de Celda de Tiempo
+  // Sub-componente Celda
   const TimeCell = ({ log, type }: { log: any, type: 'ENTRADA' | 'SALIDA' }) => {
       if (!log) return (
           <div className="flex items-center gap-2 opacity-30 py-2">
@@ -223,6 +215,9 @@ export default function AttendanceView() {
 
   if (!currentUser) return null;
 
+  // Lógica para el título dinámico
+  const canViewAll = ['admin', 'superadmin', 'coordinador', 'gerente'].includes((currentUser.role || '').toLowerCase());
+
   return (
     <div className="space-y-6 animate-in fade-in pb-10">
         
@@ -235,7 +230,7 @@ export default function AttendanceView() {
                     <Calendar className="text-emerald-500" /> Bitácora de Asistencia
                 </h2>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                    {currentUser.role === 'admin' || currentUser.role === 'superadmin' ? 'Vista Global' : 'Mis Registros'}
+                    {canViewAll ? 'Vista Global de Personal' : 'Mis Registros Personales'}
                 </p>
             </div>
 
@@ -261,7 +256,7 @@ export default function AttendanceView() {
                             {[
                                 { id: 'hoy', label: 'Hoy' },
                                 { id: 'semana', label: 'Esta Semana' },
-                                { id: 'quincena', label: 'Esta Quincena' }, // ✨ TU NUEVA OPCIÓN
+                                { id: 'quincena', label: 'Esta Quincena' },
                                 { id: 'mes', label: 'Este Mes' },
                                 { id: 'custom', label: 'Personalizado' },
                             ].map((opt) => (
@@ -277,7 +272,7 @@ export default function AttendanceView() {
                     )}
                 </div>
 
-                {/* 2. Selectores de Fecha (Visibles si es custom o informativos) */}
+                {/* 2. Selectores de Fecha */}
                 <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex-1 xl:flex-none">
                     <input 
                         type="date" 

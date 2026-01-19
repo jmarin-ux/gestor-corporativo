@@ -1,171 +1,290 @@
 'use client';
 
-import { useState } from 'react'; // ✅ Importamos useState
+import { useState, useMemo } from 'react';
 import { 
   Calendar, Users, ChevronLeft, ChevronRight, 
-  Loader2, Plus, X, RefreshCw, ClipboardList, Info, ArrowLeft, MapPin, History, CheckCircle2, Lock, User, HardHat
+  Loader2, Plus, X, RefreshCw, ClipboardList, Info, ArrowLeft, History, 
+  CheckCircle2, User, AlertTriangle, Layers, LayoutGrid, UserCheck, ShieldCheck
 } from 'lucide-react';
 import { usePlannerLogic } from './usePlannerLogic';
 import ServiceDetailModal from './ServiceDetailModal'; 
-// ✅ Importamos el nuevo Modal
 import CreateTicketModal from './CreateTicketModal'; 
 
 export default function PlannerView({ currentUser, onBack }: { currentUser: any, onBack?: () => void }) {
   
-  // ✅ Estado para controlar el modal de Autogestión
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [groupByLeader, setGroupByLeader] = useState(false);
+  const [selectedCoordinator, setSelectedCoordinator] = useState('');
 
   const {
-    loading, saving, leadersList, auxiliariesList, pendingTickets, allStaff,
+    loading, leadersList, auxiliariesList, pendingTickets, allStaff,
     selectedLeader, selectedAux, kanbanBoard, 
     detailModalOpen, selectedTicketForDetail,
     weekNumber, weekDays, currentMonday, currentSunday,
     canEdit, isOperative,
     setSelectedLeader, setSelectedAux, 
     openTicketDetail, closeDetailModal,
-    handleSaveAll, removeCard, loadData, changeWeek
+    removeCard, loadData, changeWeek
   } = usePlannerLogic(currentUser);
 
-  if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#00C897]" size={48}/></div>;
+  // 1. LISTA DE COORDINADORES
+  const coordinatorsList = useMemo(() => {
+    return allStaff.filter(u => 
+        ['coordinador', 'admin', 'superadmin', 'gerente'].includes((u.role || '').toLowerCase().trim())
+    );
+  }, [allStaff]);
+
+  // 2. HELPER: OBTENER NOMBRE CORTO (Para tarjetas compactas)
+  const getStaffName = (id: string) => {
+    if (!id) return 'S/A';
+    const staff = allStaff.find(s => s.id === id);
+    // Retorna solo el primer nombre o '...'
+    return staff ? staff.full_name.split(' ')[0] : '...';
+  };
+
+  // 🎨 ESTILOS COMPACTOS
+  const getCardStyle = (card: any) => {
+    const status = (card.status || '').toLowerCase();
+    const type = (card.service_type || '').toLowerCase();
+    const priority = (card.priority || '').toLowerCase();
+
+    let base = "border-l-[3px] bg-white transition-all duration-200";
+
+    if (['realizado', 'cerrado', 'listo', 'finalizado'].includes(status)) {
+        return `${base} border-l-emerald-500 hover:bg-emerald-50/50`;
+    }
+    if (type.includes('correctivo') && priority === 'urgente') {
+        return `${base} border-l-rose-500 hover:bg-rose-50/50`;
+    }
+    return `${base} border-l-blue-400 hover:bg-blue-50/50`;
+  };
+
+  const processCards = (cards: any[]) => {
+    let filtered = cards;
+    if (selectedCoordinator) {
+        filtered = cards.filter(c => 
+            (c.coordinator_id === selectedCoordinator) || (c.coordinador_id === selectedCoordinator)
+        );
+    }
+
+    if (!groupByLeader) return { 'TODOS': filtered };
+
+    return filtered.reduce((groups: any, card: any) => {
+        const leaderName = card.leader_name || 'SIN ASIGNAR';
+        if (!groups[leaderName]) groups[leaderName] = [];
+        groups[leaderName].push(card);
+        return groups;
+    }, {});
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-[#0a1e3f]" size={48}/></div>;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+    <div className="flex flex-col h-screen bg-[#F8FAFC] font-sans overflow-hidden text-[#0a1e3f]">
       
-      {/* HEADER */}
-      <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="bg-slate-100 p-3 rounded-2xl text-slate-500 hover:bg-slate-200 transition-all shadow-sm active:scale-95">
-              <ArrowLeft size={24} />
-          </button>
-          <div className="bg-[#0a1e3f] p-3 rounded-2xl text-white"><History size={24} /></div>
+      {/* --- HEADER --- */}
+      <div className="bg-white border-b border-slate-200 px-4 py-3 flex justify-between items-center shrink-0 z-20 shadow-sm">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                <ArrowLeft size={18} />
+            </button>
+          )}
           <div>
-            <h2 className="text-xl font-black text-slate-800 tracking-tight uppercase">Planificador Maestro</h2>
-            <div className="flex items-center gap-3 mt-1">
-              <span className="bg-blue-100 text-blue-600 px-3 py-0.5 rounded-full text-[9px] font-black uppercase">Semana #{weekNumber}</span>
-              <button onClick={loadData} className="text-[10px] font-bold text-slate-400 flex items-center gap-1 hover:text-blue-500 transition-colors"><RefreshCw size={12}/> Recargar</button>
+            <div className="flex items-center gap-2">
+                <h2 className="text-base font-black tracking-tight uppercase">Planificador</h2>
+                <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-blue-100">
+                    S{weekNumber}
+                </span>
             </div>
+            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1 mt-0.5">
+                <Calendar size={10}/>
+                {currentMonday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} - {currentSunday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-100 shadow-inner">
-          <button onClick={() => changeWeek(-7)} className="p-2 hover:bg-white rounded-xl transition-all shadow-sm"><ChevronLeft size={20}/></button>
-          <div className="text-center px-4">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Periodo</p>
-            <p className="font-bold text-slate-800 text-xs">{currentMonday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} - {currentSunday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}</p>
-          </div>
-          <button onClick={() => changeWeek(7)} className="p-2 hover:bg-white rounded-xl transition-all shadow-sm"><ChevronRight size={20}/></button>
+        <div className="flex items-center gap-2">
+            <button 
+                onClick={() => setGroupByLeader(!groupByLeader)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all border ${
+                    groupByLeader 
+                    ? 'bg-[#0a1e3f] text-white border-[#0a1e3f]' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+            >
+                {groupByLeader ? <Layers size={12}/> : <LayoutGrid size={12}/>}
+                {groupByLeader ? 'Agrupado' : 'Simple'}
+            </button>
+
+            <div className="h-5 w-px bg-slate-200 mx-1"></div>
+
+            <div className="flex items-center bg-white border border-slate-200 rounded-md p-0.5 shadow-sm">
+                <button onClick={() => changeWeek(-7)} className="p-1.5 hover:bg-slate-100 rounded text-slate-500"><ChevronLeft size={14}/></button>
+                <button onClick={() => loadData()} className="mx-1 p-1.5 hover:bg-slate-100 rounded text-blue-600" title="Actualizar"><RefreshCw size={12}/></button>
+                <button onClick={() => changeWeek(7)} className="p-1.5 hover:bg-slate-100 rounded text-slate-500"><ChevronRight size={14}/></button>
+            </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+      {/* --- CONTENIDO --- */}
+      <div className="flex-1 flex overflow-hidden">
         
-        {/* PANEL IZQUIERDO */}
+        {/* SIDEBAR COMPACTO */}
         {!isOperative && (
-            <div className="xl:col-span-3 space-y-6">
-              <div className="bg-[#0a1e3f] p-8 rounded-[2.5rem] text-white shadow-2xl space-y-6 relative overflow-hidden">
-                {!selectedLeader && (
-                    <div className="absolute top-0 left-0 w-full bg-yellow-500 text-[#0a1e3f] text-[10px] font-black text-center py-1 uppercase tracking-widest z-10">Vista General (Solo Lectura)</div>
-                )}
-                <h3 className="font-black text-xs uppercase tracking-widest text-[#00C897] flex items-center gap-2 mt-4"><Users size={16}/> Cuadrilla</h3>
-                <div className="space-y-4">
-                  <div>
-                      <label className="text-[9px] font-bold text-slate-400 uppercase ml-2 mb-1 block">Líder</label>
-                      <select className="w-full bg-white/10 border border-white/10 rounded-xl py-3 px-4 text-xs font-bold outline-none text-white focus:bg-white/20 transition-all" 
-                              value={selectedLeader} onChange={(e) => setSelectedLeader(e.target.value)}>
-                        <option value="" className="text-slate-800">-- VER TODOS --</option>
-                        {leadersList.map(l => <option key={l.id} value={l.id} className="text-slate-800">{l.full_name}</option>)}
-                      </select>
-                  </div>
-                  {selectedLeader && canEdit && (
-                        <div>
-                            <label className="text-[9px] font-bold text-slate-400 uppercase ml-2 mb-1 block">Auxiliar</label>
-                            <select className="w-full bg-white/10 border border-white/10 rounded-xl py-3 px-4 text-xs font-bold outline-none text-white focus:bg-white/20 transition-all" 
-                                    value={selectedAux} onChange={(e) => setSelectedAux(e.target.value)}>
-                                <option value="" className="text-slate-800">-- Sin Auxiliar --</option>
-                                {auxiliariesList.map(a => <option key={a.id} value={a.id} className="text-slate-800">{a.full_name}</option>)}
-                            </select>
-                        </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 👇 BOTÓN NUEVA AUTOGESTIÓN (AQUÍ ESTÁ LO NUEVO) */}
-              <button 
-                onClick={() => setIsCreateModalOpen(true)}
-                className="w-full bg-[#00C897] hover:bg-emerald-400 text-[#0a1e3f] py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
-              >
-                <Plus size={18} strokeWidth={3}/> Nueva Autogestión
-              </button>
-
-              {/* BANDEJA DE PENDIENTES */}
-              <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-100 h-[500px] flex flex-col">
-                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4 flex items-center gap-2">
-                  <ClipboardList size={14} className="text-blue-500"/> Pendientes ({pendingTickets.length})
-                </h3>
-                <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                  {pendingTickets.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                      <ClipboardList className="mb-2" size={32}/>
-                      <p className="text-[10px] font-bold uppercase tracking-tighter">Bandeja vacía</p>
+            <div className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 z-10">
+                <div className="p-4 border-b border-slate-100 space-y-3">
+                    <div className="flex items-center gap-1.5 text-[#0a1e3f] mb-1">
+                        <Users size={14} className="text-blue-600"/>
+                        <span className="text-[10px] font-black uppercase tracking-wide">Filtros</span>
                     </div>
-                  ) : (
-                    pendingTickets.map(t => (
-                      <div key={t.id} 
-                           onClick={() => openTicketDetail(t)} // CLICK ABRE DETALLE
-                           className="p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-300 hover:bg-blue-50/30 transition-all group cursor-pointer relative shadow-sm">
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded uppercase">{t.codigo_servicio}</span>
+                    
+                    <div className="space-y-2">
+                        <div className="relative">
+                            <select className="w-full bg-slate-50 border border-slate-200 rounded-md py-1.5 pl-7 pr-2 text-[10px] font-bold text-slate-700 outline-none uppercase cursor-pointer" 
+                                    value={selectedCoordinator} onChange={(e) => setSelectedCoordinator(e.target.value)}>
+                                <option value="">Coord: Todos</option>
+                                {coordinatorsList.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+                            </select>
+                            <ShieldCheck size={10} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
                         </div>
-                        <p className="text-[11px] font-black text-slate-800 leading-tight uppercase mt-2 truncate">{t.company}</p>
-                        <p className="text-[10px] font-bold text-slate-500 leading-tight mt-1 truncate">{t.service_type}</p>
-                        <div className="mt-3 pt-3 border-t border-slate-200/50 flex items-center justify-between">
-                            <p className="text-[9px] text-slate-400 font-medium truncate w-32 flex items-center gap-1"><MapPin size={9}/> {t.location || 'S/N'}</p>
-                            <Info size={14} className="text-blue-400"/>
+
+                        <div className="relative">
+                            <select className="w-full bg-slate-50 border border-slate-200 rounded-md py-1.5 pl-7 pr-2 text-[10px] font-bold text-slate-700 outline-none uppercase cursor-pointer" 
+                                    value={selectedLeader} onChange={(e) => setSelectedLeader(e.target.value)}>
+                                <option value="">Líder: Todos</option>
+                                {leadersList.map(l => <option key={l.id} value={l.id}>{l.full_name}</option>)}
+                            </select>
+                            <User size={10} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
                         </div>
-                      </div>
-                    ))
-                  )}
+                    </div>
+
+                    <button 
+                        onClick={() => setIsCreateModalOpen(true)}
+                        className="w-full bg-[#00C897] hover:bg-emerald-400 text-[#0a1e3f] py-2 rounded-lg font-black text-[10px] uppercase shadow-sm transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                    >
+                        <Plus size={12} strokeWidth={3}/> Nueva Solicitud
+                    </button>
                 </div>
-              </div>
+
+                <div className="flex-1 flex flex-col overflow-hidden bg-slate-50/50">
+                    <div className="px-3 py-2 bg-white border-b border-slate-100 flex justify-between items-center">
+                        <span className="text-[9px] font-black uppercase text-slate-400">Por Asignar</span>
+                        <span className="bg-slate-200 text-slate-600 px-1.5 rounded text-[9px] font-bold">{pendingTickets.length}</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
+                        {pendingTickets.map(t => (
+                            <div key={t.id} onClick={() => openTicketDetail(t)}
+                                className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm hover:border-blue-300 cursor-pointer group">
+                                <div className="flex justify-between mb-0.5">
+                                    <span className="text-[8px] font-bold text-blue-600 bg-blue-50 px-1 rounded border border-blue-100">{t.codigo_servicio}</span>
+                                </div>
+                                <p className="text-[10px] font-black text-slate-700 uppercase truncate">{t.company}</p>
+                                <p className="text-[9px] text-slate-400 truncate">{t.service_type}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
         )}
 
-        {/* TABLERO KANBAN */}
-        <div className={isOperative ? "xl:col-span-12 overflow-x-auto pb-6" : "xl:col-span-9 overflow-x-auto pb-6"}>
-          <div className="flex gap-4 min-w-[1400px] h-full">
+        {/* TABLERO KANBAN ULTRA COMPACTO */}
+        <div className="flex-1 overflow-x-auto overflow-y-hidden bg-[#F1F5F9] p-2">
+          <div className="flex gap-2 h-full min-w-max">
             {weekDays.map((day) => {
-              const cards = kanbanBoard[day.dateStr] || [];
+              const rawCards = kanbanBoard[day.dateStr] || [];
+              const processedData = processCards(rawCards);
+              const isToday = day.isToday;
+
               return (
-                <div key={day.dateStr} className={`flex-1 rounded-[2.5rem] border flex flex-col overflow-hidden transition-all shadow-sm ${day.isToday ? 'bg-blue-50/30 border-blue-200' : 'bg-slate-50/50 border-slate-200'}`}>
+                <div key={day.dateStr} className={`w-[220px] flex flex-col rounded-xl overflow-hidden shadow-sm border transition-all ${isToday ? 'bg-white border-blue-300 ring-2 ring-blue-50' : 'bg-slate-100 border-slate-200'}`}>
                   
-                  <div className={`p-5 border-b ${day.isToday ? 'bg-blue-100/50 border-blue-200' : 'bg-white border-slate-100'}`}>
-                    <h4 className={`font-black text-[11px] uppercase tracking-tighter ${day.isToday ? 'text-blue-700' : 'text-slate-800'}`}>{day.name}</h4>
-                    <p className="text-[10px] font-bold text-slate-400">{day.date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}</p>
+                  {/* Header Día */}
+                  <div className={`py-1.5 px-3 border-b flex justify-between items-center ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}>
+                    <span className={`text-[10px] font-black uppercase ${isToday ? 'text-blue-700' : 'text-slate-600'}`}>{day.name}</span>
+                    <span className={`text-[9px] font-bold ${isToday ? 'text-blue-500' : 'text-slate-400'}`}>{day.date.getDate()}</span>
                   </div>
-                  
-                  <div className="p-3 flex-1 space-y-3 overflow-y-auto max-h-[600px] min-h-[300px]">
-                    {cards.map((card) => (
-                      <div key={card.temp_id} 
-                           onClick={() => openTicketDetail(card)} // CLICK ABRE DETALLE
-                           className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 group relative hover:shadow-md transition-all hover:scale-[1.02] cursor-pointer">
-                        <div className="flex justify-between items-start mb-1">
-                            <p className="text-[10px] font-black text-blue-600 uppercase truncate max-w-[80%]">{card.client_name}</p>
-                            {canEdit && (
-                                <button onClick={(e) => { e.stopPropagation(); removeCard(day.dateStr, card.temp_id, card.id); }} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><X size={14}/></button>
+
+                  {/* Cuerpo */}
+                  <div className="flex-1 overflow-y-auto p-1.5 space-y-2 custom-scrollbar bg-slate-50/30">
+                    
+                    {Object.entries(processedData).map(([groupName, groupCards]: [string, any]) => (
+                        <div key={groupName} className="space-y-1.5">
+                            
+                            {/* Cabecera Grupo */}
+                            {groupByLeader && (
+                                <div className="flex items-center gap-1.5 pl-1 mt-1">
+                                    <div className="w-3.5 h-3.5 rounded-full bg-[#0a1e3f] text-white flex items-center justify-center text-[7px] font-bold">
+                                        {groupName.charAt(0)}
+                                    </div>
+                                    <span className="text-[9px] font-bold uppercase text-slate-500 truncate max-w-[150px]">
+                                        {groupName}
+                                    </span>
+                                </div>
                             )}
+
+                            {/* TARJETAS ULTRA COMPACTAS */}
+                            {groupCards.map((card: any) => (
+                                <div key={card.temp_id} 
+                                    onClick={() => openTicketDetail(card)}
+                                    className={`relative p-2 rounded-lg border shadow-sm hover:shadow-md cursor-pointer group ${getCardStyle(card)}`}>
+                                    
+                                    {/* 1. Header: Folio y Estado Urgente */}
+                                    <div className="flex justify-between items-center mb-0.5">
+                                        <span className="text-[8px] font-bold text-slate-400 tracking-wider">#{card.codigo_servicio}</span>
+                                        <div className="flex items-center gap-1">
+                                            {card.priority?.toLowerCase() === 'urgente' && <AlertTriangle size={8} className="text-rose-500 animate-pulse" />}
+                                            {canEdit && (
+                                                <button onClick={(e) => { e.stopPropagation(); removeCard(day.dateStr, card.temp_id, card.id); }} 
+                                                        className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded transition-all">
+                                                    <X size={10}/>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 2. Cliente (Título) */}
+                                    <p className="text-[10px] font-black text-slate-800 uppercase leading-tight truncate mb-0.5" title={card.company}>
+                                        {card.client_name || card.company || 'SIN CLIENTE'}
+                                    </p>
+
+                                    {/* 3. Tipo Servicio */}
+                                    <p className="text-[8px] font-medium text-slate-500 uppercase truncate leading-tight">
+                                        {card.service_type}
+                                    </p>
+
+                                    {/* 4. FOOTER: COORDINADOR Y LÍDER */}
+                                    <div className="mt-2 pt-1.5 border-t border-slate-100 grid grid-cols-2 gap-1">
+                                        
+                                        {/* Líder Técnico */}
+                                        {!groupByLeader && (
+                                            <div className="flex items-center gap-1 truncate" title={`Líder: ${card.leader_name}`}>
+                                                <User size={8} className="text-blue-400 shrink-0"/>
+                                                <span className="text-[8px] font-bold text-slate-600 uppercase truncate">
+                                                    {card.leader_name?.split(' ')[0] || '-'}
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        {/* Coordinador (NUEVO) */}
+                                        <div className="flex items-center gap-1 truncate" title={`Coord: ${getStaffName(card.coordinator_id || card.coordinador_id)}`}>
+                                            <ShieldCheck size={8} className="text-emerald-500 shrink-0"/>
+                                            <span className="text-[8px] font-bold text-slate-600 uppercase truncate">
+                                                {getStaffName(card.coordinator_id || card.coordinador_id)}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            ))}
                         </div>
-                        <p className="text-[11px] font-bold text-slate-800 leading-tight truncate">{card.site_data?.name || card.service_type}</p>
-                        
-                        {!selectedLeader && card.leader_name && (
-                            <div className="mt-2 flex items-center gap-1 text-[9px] font-black uppercase text-emerald-600 bg-emerald-50 w-fit px-2 py-0.5 rounded-lg">
-                                <User size={10}/> {card.leader_name}
-                            </div>
-                        )}
-                        <div className="flex items-center gap-1 mt-2 text-[9px] font-bold text-slate-400 uppercase pt-2 border-t border-slate-50">
-                          <CheckCircle2 size={12} className="text-emerald-500"/> {card.service_type}
-                        </div>
-                      </div>
                     ))}
+                    
+                    {rawCards.length === 0 && (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-300 min-h-[60px]">
+                            <p className="text-[8px] font-bold uppercase select-none opacity-50">Libre</p>
+                        </div>
+                    )}
                   </div>
                 </div>
               );
@@ -174,7 +293,7 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
         </div>
       </div>
 
-      {/* MODAL COMPLETO DE DETALLE */}
+      {/* MODALES */}
       {detailModalOpen && selectedTicketForDetail && (
         <ServiceDetailModal 
             isOpen={true} 
@@ -186,15 +305,12 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
         />
       )}
 
-      {/* ✅ MODAL DE AUTOGESTIÓN */}
       {isCreateModalOpen && (
         <CreateTicketModal 
           isOpen={true}
           onClose={() => setIsCreateModalOpen(false)}
           currentUser={currentUser}
-          onSuccess={() => {
-            loadData(); // Recargamos el tablero al crear
-          }}
+          onSuccess={() => loadData()}
         />
       )}
     </div>

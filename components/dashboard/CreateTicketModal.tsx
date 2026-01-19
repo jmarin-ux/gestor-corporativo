@@ -43,13 +43,13 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
     serviceType: 'Autogestión' 
   });
 
-  // Debounce
+  // Debounce for asset search
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(assetSearch), 500);
     return () => clearTimeout(timer);
   }, [assetSearch]);
 
-  // Carga Inicial
+  // Initial Load
   useEffect(() => {
     if (isOpen) {
       setClientMode('existing');
@@ -82,13 +82,13 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
       if (cReq.data) setClients(cReq.data);
       if (sReq.data) setStaffList(sReq.data); 
     } catch (error) {
-      console.error("Error datos:", error);
+      console.error("Error loading initial data:", error);
     } finally {
       setInitialLoading(false);
     }
   };
 
-  // Búsqueda de Activos
+  // Asset Search Logic
   useEffect(() => {
     if (!debouncedSearch) {
         setFoundAssets([]);
@@ -100,14 +100,17 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
   const searchAssetsInServer = async (term: string) => {
     setSearchingAssets(true);
     try {
+        // Corrected OR syntax for Supabase
         const { data, error } = await supabase
             .from('assets')
             .select('*, clients(organization)')
             .or(`nombre_activo.ilike.%${term}%,serie.ilike.%${term}%,identificador.ilike.%${term}%`)
-            .limit(10); 
-        if (!error && data) setFoundAssets(data);
+            .limit(10);
+            
+        if (error) throw error;
+        if (data) setFoundAssets(data);
     } catch (err) {
-        console.error(err);
+        console.error("Asset search error:", err);
     } finally {
         setSearchingAssets(false);
     }
@@ -122,7 +125,7 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
     return `AU${month}${year}${randomStr}`;
   };
 
-  // --- GUARDADO ---
+  // --- SUBMISSION HANDLER ---
   const handleSubmit = async () => {
     if (!formData.description) return alert("Falta descripción.");
     if (clientMode === 'existing' && !formData.clientId) return alert("Selecciona cliente.");
@@ -133,25 +136,35 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
         const generatedCode = generateAutoCode();
         let finalClientId = formData.clientId;
 
-        // Determinar Ubicación (Para evitar error NULL)
-        let finalLocation = 'SITIO DEL CLIENTE'; // Valor por defecto seguro
+        // Determine Location Logic
+        let finalLocation = 'SITIO DEL CLIENTE'; // Default safe value
+        
         if (clientMode === 'new') {
-            finalLocation = formData.manualClientName; // Usar nombre empresa como ubicación
+            finalLocation = formData.manualClientName; // Use company name for new clients
         } else {
-            // Si es existente, intentamos obtener el nombre del cliente de la lista
+            // If existing client, try to get organization name
             const clientObj = clients.find(c => c.id === finalClientId);
-            if (clientObj) finalLocation = clientObj.organization || 'OFICINAS';
+            if (clientObj) {
+                finalLocation = clientObj.organization || clientObj.full_name || 'OFICINAS';
+            }
+        }
+
+        // --- COORDINATOR AUTO-ASSIGNMENT LOGIC ---
+        // If current user is a coordinator, auto-assign ticket to them
+        let coordinatorAssigned = null;
+        if (currentUser?.role === 'coordinador') {
+            coordinatorAssigned = currentUser.id;
         }
 
         const newTicket = {
             description: formData.description,
+            // ❌ ELIMINADO EL CAMPO 'title' PARA EVITAR EL ERROR DE SCHEMA
             codigo_servicio: generatedCode,
             service_type: 'Autogestión',
             status: formData.leaderId ? 'asignado' : 'pendiente',
             
             priority: formData.priority,
             
-            // 🟢 SOLUCIÓN AL ERROR DE UBICACIÓN
             location: finalLocation, 
 
             quote_reference: formData.projectReference, 
@@ -166,12 +179,16 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
             technical_lead_id: formData.leaderId || null,
             auxiliary_id: formData.auxiliarId || null,
             
+            coordinator_id: coordinatorAssigned, // <--- Auto-assign coordinator here
+            created_by: currentUser?.id, // Track creator
+            
             technical_level: 'autogestion'
         };
 
         const { error } = await supabase.from('tickets').insert([newTicket]);
         if (error) throw error;
 
+        // Optional: Update asset location if assigned to a client
         if (clientMode === 'existing' && formData.assetId && finalClientId) {
             await supabase.from('assets').update({ client_id: finalClientId }).eq('id', formData.assetId);
         }
@@ -188,7 +205,7 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
     }
   };
 
-  // Filtros de Personal (Estricto)
+  // Staff Filters
   const leadersList = staffList.filter(u => ['lider', 'operativo', 'líder'].includes((u.role || '').toLowerCase().trim()));
   const auxiliariesList = staffList.filter(u => ['auxiliar', 'ayudante', 'operativo'].includes((u.role || '').toLowerCase().trim()));
 
