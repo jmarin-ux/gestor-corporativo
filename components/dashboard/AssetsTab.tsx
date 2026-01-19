@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 import { 
   Search, 
   Plus, 
@@ -12,9 +12,16 @@ import {
 } from 'lucide-react';
 import EditAssetModal from './super-admin/EditAssetModal';
 
-export default function AssetsTab({ currentUser }: { currentUser: any }) {
-  const [assets, setAssets] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
+interface AssetsTabProps {
+  currentUser: any;
+  assets?: any[];      // <--- Agregado
+  clients?: any[];     // <--- Agregado
+  onRefresh?: any;     // <--- Agregado
+}
+
+export default function AssetsTab({ currentUser, assets = [], clients = [], onRefresh }: AssetsTabProps) {
+  const [localAssets, setLocalAssets] = useState<any[]>(assets); // Initialize with prop data
+  const [localClients, setLocalClients] = useState<any[]>(clients); // Initialize with prop data
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -44,8 +51,8 @@ export default function AssetsTab({ currentUser }: { currentUser: any }) {
         .select('*')
         .order('full_name');
 
-      setAssets(assetsData || []);
-      setClients(clientsData || []);
+      setLocalAssets(assetsData || []);
+      setLocalClients(clientsData || []);
     } catch (error) {
       console.error("Error cargando activos:", error);
     } finally {
@@ -54,6 +61,7 @@ export default function AssetsTab({ currentUser }: { currentUser: any }) {
   };
 
   useEffect(() => {
+    // Only fetch if initial data wasn't provided or to refresh
     fetchAssets();
   }, []);
 
@@ -74,7 +82,7 @@ export default function AssetsTab({ currentUser }: { currentUser: any }) {
     setIsModalOpen(true);
   };
 
-  const filteredAssets = assets.filter(asset => {
+  const filteredAssets = localAssets.filter(asset => {
     const term = searchTerm.toLowerCase();
     return (
       (asset.nombre_activo || '').toLowerCase().includes(term) ||
@@ -97,7 +105,7 @@ export default function AssetsTab({ currentUser }: { currentUser: any }) {
                 <div>
                     <h2 className="text-xl font-black text-[#0a1e3f] uppercase">Inventario de Activos</h2>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        {assets.length} Equipos registrados
+                        {localAssets.length} Equipos registrados
                     </p>
                 </div>
             </div>
@@ -238,7 +246,7 @@ export default function AssetsTab({ currentUser }: { currentUser: any }) {
         <EditAssetModal 
             isOpen={isModalOpen}
             asset={selectedAsset}
-            clients={clients}
+            clients={localClients}
             onClose={() => setIsModalOpen(false)}
             onUpdate={fetchAssets}
         />
