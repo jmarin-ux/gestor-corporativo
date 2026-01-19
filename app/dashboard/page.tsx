@@ -14,13 +14,16 @@ import ClientMirrorView from '@/components/dashboard/ClientMirrorView';
 import ServiceDetailModal from '@/components/dashboard/ServiceDetailModal';
 import GlobalAdminModal from '@/components/dashboard/super-admin/GlobalAdminModal';
 import EditAssetModal from '@/components/dashboard/super-admin/EditAssetModal';
-import RolesManager from '@/components/dashboard/super-admin/RolesManager'; // 👈 IMPORTANTE: Asegúrate que la ruta sea correcta
+import RolesManager from '@/components/dashboard/super-admin/RolesManager';
+import AttendanceModal from '@/components/dashboard/AttendanceModal';
+// 1. IMPORTAMOS LA VISTA DE ASISTENCIA
+import AttendanceView from '@/components/dashboard/super-admin/AttendanceView'; 
 
 // --- ICONOS ---
-import { Search, RefreshCw, LayoutGrid, LogOut, Loader2, Settings } from 'lucide-react';
+import { Search, RefreshCw, LayoutGrid, LogOut, Loader2, Settings, Camera, Clock } from 'lucide-react'; 
 
 // Tipos de pestañas
-type Tab = 'operaciones' | 'planificador' | 'personal' | 'activos' | 'clientes' | 'configuracion';
+type Tab = 'operaciones' | 'planificador' | 'personal' | 'activos' | 'clientes' | 'configuracion' | 'asistencia';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -28,13 +31,14 @@ export default function DashboardPage() {
   // --- ESTADOS DE UI ---
   const [activeTab, setActiveTab] = useState<Tab>('operaciones');
   const [loading, setLoading] = useState(true);
+  const [showAttendance, setShowAttendance] = useState(false);
   
   // --- ESTADOS DE DATOS ---
   const [user, setUser] = useState<any>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('');
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
   
-  // Base de datos local (Estado)
+  // Base de datos local
   const [data, setData] = useState<{ tickets: any[], users: any[], assets: any[], clients: any[] }>({ 
     tickets: [], 
     users: [], 
@@ -52,9 +56,7 @@ export default function DashboardPage() {
     search: '', month: 'todos', year: new Date().getFullYear().toString() 
   });
 
-  // ---------------------------------------------------------
-  // 1. CARGA DE DATOS (FETCH)
-  // ---------------------------------------------------------
+  // 1. CARGA DE DATOS
   const fetchData = useCallback(async (currentUser: any) => {
     if (!currentUser?.id || !currentUser?.role) return;
     
@@ -63,15 +65,12 @@ export default function DashboardPage() {
 
     setLoading(true);
     try {
-      // Consulta de Tickets
       let ticketsQuery = supabase.from('tickets').select('*').order('created_at', { ascending: false });
 
-      // Si es coordinador, filtra solo los suyos
       if (role === 'coordinador') {
          ticketsQuery = ticketsQuery.or(`coordinator_id.eq.${currentUser.id},coordinador_id.eq.${currentUser.id}`);
       }
 
-      // Consultas paralelas para velocidad
       const [tRes, pRes, aRes, cRes] = await Promise.all([
         ticketsQuery,
         supabase.from('profiles').select('*').order('full_name'), 
@@ -82,7 +81,6 @@ export default function DashboardPage() {
       const rawTickets = tRes.data || [];
       const rawClients = cRes.data || [];
 
-      // "Join" Manual de Tickets con Clientes
       const processedTickets = rawTickets.map((ticket: any) => {
           const clientMatch = rawClients.find((c: any) => 
               (c.email && c.email === ticket.client_email) || 
@@ -113,9 +111,7 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // ---------------------------------------------------------
-  // 2. SEGURIDAD, ARRANQUE Y VERIFICACIÓN DE ROL
-  // ---------------------------------------------------------
+  // 2. SEGURIDAD Y ARRANQUE
   useEffect(() => {
     let alive = true;
     const boot = async () => {
@@ -128,14 +124,11 @@ export default function DashboardPage() {
 
       if (!profile) { await supabase.auth.signOut(); router.replace('/login'); return; }
 
-      // Normalizamos el rol a minúsculas para evitar errores (Ej: SuperAdmin -> superadmin)
       const role = (profile.role || '').toLowerCase().trim();
       
-      // 🔍 DEBUG: Mira esto en la consola (F12) si no ves el botón
-      console.log("🔍 ROL DETECTADO:", role); 
-
-      // Redirecciones de seguridad
-      if (['operativo', 'staff', 'technician'].includes(role)) { router.replace('/dashboard-staff'); return; }
+      // ⚠️ COMENTADO PARA PERMITIR ACCESO A OPERATIVOS A ESTE PANEL
+      // if (['operativo', 'staff', 'technician'].includes(role)) { router.replace('/dashboard-staff'); return; }
+      
       if (['client', 'cliente'].includes(role)) { router.replace('/accesos/cliente'); return; }
 
       if (alive) {
@@ -149,9 +142,7 @@ export default function DashboardPage() {
     return () => { alive = false; };
   }, [fetchData, router]);
 
-  // ---------------------------------------------------------
-  // 3. LÓGICA DE FILTROS Y TABS VISIBLES
-  // ---------------------------------------------------------
+  // 3. LÓGICA DE VISUALIZACIÓN
   const ticketsFiltered = useMemo(() => {
     const term = filters.search.toLowerCase();
     return (data.tickets || []).filter((t: any) => {
@@ -165,10 +156,22 @@ export default function DashboardPage() {
     });
   }, [data.tickets, filters]);
 
-  // Define qué pestañas ve cada rol (NOTA: Configuración está oculta aquí, se accede por el engrane)
+  // 👇 4. CONFIGURACIÓN DE PESTAÑAS (AQUÍ ESTABA EL DETALLE)
   const visibleTabs = useMemo(() => {
-      if (currentUserRole === 'coordinador') return ['operaciones', 'planificador', 'clientes'];
-      return ['operaciones', 'planificador', 'personal', 'clientes', 'activos'];
+      // Pestañas BASE que TODOS ven (incluido Operativos)
+      // Agregamos 'asistencia' aquí para que aparezca
+      const tabs: Tab[] = ['operaciones', 'planificador', 'asistencia'];
+
+      // Pestañas EXTRA para ADMIN y SUPERADMIN
+      if (['superadmin', 'admin'].includes(currentUserRole)) {
+          tabs.push('personal', 'clientes', 'activos');
+      } 
+      // Pestañas EXTRA para COORDINADOR
+      else if (currentUserRole === 'coordinador') {
+          tabs.push('clientes');
+      }
+      
+      return tabs;
   }, [currentUserRole]);
 
   const handleLogout = async () => {
@@ -179,10 +182,6 @@ export default function DashboardPage() {
     }
   };
 
-  // ---------------------------------------------------------
-  // 4. RENDERIZADO (VISTA)
-  // ---------------------------------------------------------
-
   if (loading && !user) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
@@ -192,7 +191,6 @@ export default function DashboardPage() {
     );
   }
 
-  // Vista espejo (Simulación de cliente)
   if (modals.sim) {
     return <ClientMirrorView client={modals.sim} tickets={data.tickets} onExit={() => setModals({ ...modals, sim: null })} />;
   }
@@ -219,7 +217,17 @@ export default function DashboardPage() {
             <p className="text-[10px] font-bold text-[#00C897] uppercase">{currentUserRole}</p>
           </div>
 
-          {/* ⚙️ BOTÓN DE CONFIGURACIÓN (VISIBLE SOLO PARA SUPERADMIN) */}
+          <button 
+              onClick={() => setShowAttendance(true)}
+              className="bg-white/10 hover:bg-white/20 px-4 py-3 rounded-2xl transition-all flex items-center gap-2 backdrop-blur-sm group border border-white/10"
+              title="Marcar Asistencia"
+          >
+              <Camera size={20} className="text-[#00C897] group-hover:scale-110 transition-transform" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white hidden md:inline">
+                  Asistencia
+              </span>
+          </button>
+
           {currentUserRole === 'superadmin' && (
             <button 
                 onClick={() => setActiveTab('configuracion')}
@@ -239,18 +247,19 @@ export default function DashboardPage() {
       {/* --- CONTENIDO PRINCIPAL --- */}
       <div className="p-6 md:p-10 pb-24 max-w-[1900px] mx-auto">
         
-        {/* BARRA DE TABS (Se oculta si estamos en Configuración) */}
+        {/* BARRA DE TABS */}
         {activeTab !== 'configuracion' && (
              <div className="bg-white p-1.5 rounded-[2rem] shadow-sm inline-flex items-center gap-2 mb-8 border border-slate-100 flex-wrap sticky top-28 z-20">
              {visibleTabs.map((tab) => (
                <button key={tab} onClick={() => setActiveTab(tab as Tab)} className={`px-6 py-3 rounded-[1.5rem] text-[10px] font-black uppercase flex items-center gap-2 transition-all ${activeTab === tab ? 'bg-[#0a1e3f] text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
+                 {tab === 'asistencia' && <Clock size={14} strokeWidth={3}/>}
                  {tab}
                </button>
              ))}
            </div>
         )}
 
-        {/* BOTÓN VOLVER (Solo visible en Configuración) */}
+        {/* BOTÓN VOLVER (CONFIG) */}
         {activeTab === 'configuracion' && (
              <div className="mb-8 animate-in fade-in slide-in-from-left-4">
                  <button onClick={() => setActiveTab('operaciones')} className="bg-white px-6 py-3 rounded-full text-slate-500 hover:text-[#0a1e3f] hover:bg-blue-50 font-black text-xs uppercase flex items-center gap-2 transition-all shadow-sm border border-slate-100">
@@ -259,40 +268,38 @@ export default function DashboardPage() {
              </div>
         )}
 
-        {/* --- VISTA: OPERACIONES --- */}
+        {/* --- VISTAS --- */}
         {activeTab === 'operaciones' && (
           <div className="animate-in fade-in zoom-in-95 duration-300">
-             <div className="flex gap-4 mb-8 bg-white p-5 rounded-[2.5rem] shadow-sm border border-slate-100">
-               <div className="relative flex-1">
-                 <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                 <input className="w-full bg-slate-50 rounded-full py-4 pl-12 pr-6 text-sm font-bold outline-none border border-transparent focus:border-[#00C897] transition-all uppercase placeholder:normal-case" 
-                   placeholder="Buscar por folio, cliente o servicio..." 
-                   value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} 
-                 />
-               </div>
-               <button onClick={() => fetchData(user)} className="p-4 bg-slate-50 rounded-full hover:bg-[#0a1e3f] hover:text-white transition-all">
-                  <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-               </button>
-             </div>
-             
-             <ServiceTable 
-               services={ticketsFiltered} 
-               staff={data.users} 
-               currentUser={user} 
-               onOpenDetails={(t: any) => setModals({ ...modals, details: t })} 
-               onRefresh={() => fetchData(user)} 
-             />
+              <div className="flex gap-4 mb-8 bg-white p-5 rounded-[2.5rem] shadow-sm border border-slate-100">
+                <div className="relative flex-1">
+                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <input className="w-full bg-slate-50 rounded-full py-4 pl-12 pr-6 text-sm font-bold outline-none border border-transparent focus:border-[#00C897] transition-all uppercase placeholder:normal-case" 
+                    placeholder="Buscar por folio, cliente o servicio..." 
+                    value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} 
+                  />
+                </div>
+                <button onClick={() => fetchData(user)} className="p-4 bg-slate-50 rounded-full hover:bg-[#0a1e3f] hover:text-white transition-all">
+                   <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+              <ServiceTable services={ticketsFiltered} staff={data.users} currentUser={user} onOpenDetails={(t: any) => setModals({ ...modals, details: t })} onRefresh={() => fetchData(user)} />
           </div>
         )}
 
-        {/* --- VISTA: PLANIFICADOR --- */}
         {activeTab === 'planificador' && (
             <div className="animate-in fade-in zoom-in-95 duration-300">
                 <PlannerView currentUser={user} onBack={() => setActiveTab('operaciones')} />
             </div>
         )}
         
-        {/* --- VISTAS ADMINISTRATIVAS --- */}
+        {/* 👇 5. RENDERIZADO DE LA VISTA DE ASISTENCIA */}
+        {activeTab === 'asistencia' && (
+            <div className="animate-in fade-in zoom-in-95 duration-300">
+                <AttendanceView />
+            </div>
+        )}
+
         {activeTab === 'personal' && visibleTabs.includes('personal') && (
             <div className="animate-in fade-in zoom-in-95 duration-300">
                 <StaffSection currentUser={user} />
@@ -309,7 +316,6 @@ export default function DashboardPage() {
             </div>
         )}
 
-        {/* ⚙️ VISTA: GESTIÓN DE ROLES (Aquí es donde ocurre la magia) */}
         {activeTab === 'configuracion' && currentUserRole === 'superadmin' && (
             <div className="animate-in fade-in zoom-in-95 duration-300">
                 <RolesManager />
@@ -319,6 +325,14 @@ export default function DashboardPage() {
       </div>
 
       {/* --- MODALES FLOTANTES --- */}
+      {showAttendance && (
+        <AttendanceModal
+            isOpen={true}
+            onClose={() => setShowAttendance(false)}
+            currentUser={user}
+        />
+      )}
+      
       {modals.admin && (
         <GlobalAdminModal isOpen={!!modals.admin} user={modals.admin} currentUser={user} canEditSensitiveData={currentUserRole === 'superadmin'} onClose={() => setModals({ ...modals, admin: null })} onUpdate={() => fetchData(user)} />
       )}
