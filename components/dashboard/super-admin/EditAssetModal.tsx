@@ -1,278 +1,242 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Save, Tag, Hash, Building2, MapPin, FileText, CheckCircle2, Package, Loader2 } from 'lucide-react';
-import { supabase } from '@/lib/supabase-browser';
+import { useState, useEffect, useCallback } from 'react';
+import { X, Save, Loader2, QrCode, RefreshCw } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface EditAssetModalProps {
   isOpen: boolean;
-  asset: any;
+  asset?: any;
   clients: any[];
   onClose: () => void;
-  
-  // Soporte dual para Dashboard nuevo y vista legacy
-  onUpdate?: () => void | Promise<void>; 
-  onSave?: (action: string, assetData: any) => void | Promise<void>; 
-  isProcessing?: boolean; 
+  onUpdate: () => void;
 }
 
-export default function EditAssetModal({ 
-  isOpen, 
-  asset, 
-  clients = [], 
-  onClose, 
-  onUpdate, 
-  onSave, 
-  isProcessing = false 
-}: EditAssetModalProps) {
+export default function EditAssetModal({ isOpen, asset, clients, onClose, onUpdate }: EditAssetModalProps) {
+  const [loading, setLoading] = useState(false);
   
-  const [formData, setFormData] = useState<any>({});
-  const [internalLoading, setInternalLoading] = useState(false);
+  const isEditing = asset && asset.id;
+
+  const [formData, setFormData] = useState({
+    identificador: '',
+    serie: '',
+    nombre_activo: '',
+    client_id: '',
+    status: 'ACTIVO',
+    location_details: ''
+  });
+
+  const generateUniqueId = useCallback(() => {
+    const random = Math.floor(1000 + Math.random() * 9000); 
+    return `ACT-${random}`;
+  }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
-
-    if (asset?.id && asset.id !== 'new') {
-      // MODO EDICIÓN
-      // Intentamos encontrar el cliente por nombre si no tenemos ID
-      const matchingClient = clients.find((c: any) => 
-        c.organization?.toUpperCase() === asset.cliente_nombre?.toUpperCase()
-      );
-
-      setFormData((prev: any) => {
-        const isSameAsset = prev?.id === asset.id;
-        
-        return {
-          ...asset,
-          // Si ya seleccionamos uno manualmente, lo mantenemos. Si no, usamos el match.
-          selectedClientId: (isSameAsset && prev?.selectedClientId) 
-            ? prev.selectedClientId 
-            : (asset.client_id || (matchingClient ? matchingClient.id : ''))
-        };
-      });
-
-    } else {
-      // MODO CREACIÓN
-      setFormData({ 
-          estatus: 'ACTIVO',
-          identificador: '',
+    if (isOpen) {
+      if (isEditing) {
+        // MODO EDICIÓN
+        setFormData({
+          identificador: asset.identificador || asset.asset_id || generateUniqueId(),
+          serie: asset.serie || asset.serial_number || '',
+          nombre_activo: asset.nombre_activo || asset.name || '',
+          client_id: asset.client_id || '',
+          status: asset.status || asset.estatus || 'ACTIVO',
+          location_details: asset.location_details || asset.ubicacion || ''
+        });
+      } else {
+        // MODO CREACIÓN
+        setFormData({
+          identificador: generateUniqueId(),
           serie: '',
           nombre_activo: '',
-          cliente_nombre: '',
-          ubicacion: '',
-          detalles: '',
-          selectedClientId: ''
-      });
+          client_id: '',
+          status: 'ACTIVO',
+          location_details: ''
+        });
+      }
     }
-  }, [isOpen, asset, clients]);
+  }, [isOpen, asset, isEditing, generateUniqueId]);
+
+  const handleRegenerateId = (e: any) => {
+    e.preventDefault();
+    setFormData(prev => ({ ...prev, identificador: generateUniqueId() }));
+  };
 
   const handleSave = async () => {
-    setInternalLoading(true);
-    try {
-      // 1. Resolver el nombre del cliente basado en el ID seleccionado
-      let finalClientName = formData.cliente_nombre;
-      let finalClientId = formData.selectedClientId; // Guardamos el ID real también
-      
-      if (formData.selectedClientId) {
-        const officialClient = clients.find((c: any) => c.id.toString() === formData.selectedClientId.toString());
-        if (officialClient) {
-            finalClientName = officialClient.organization;
-        }
-      } else {
-        finalClientId = null; // Si selecciona "-- SIN ASIGNAR --"
-      }
+    if (!formData.identificador || !formData.nombre_activo) {
+      alert("Faltan datos obligatorios (ID o Nombre).");
+      return;
+    }
 
+    setLoading(true);
+    try {
       const payload = {
         identificador: formData.identificador,
         serie: formData.serie,
         nombre_activo: formData.nombre_activo,
-        cliente_nombre: finalClientName,
-        client_id: finalClientId, // Importante guardar la relación real
-        ubicacion: formData.ubicacion,
-        detalles: formData.detalles,
-        estatus: formData.estatus
+        status: formData.status,
+        location_details: formData.location_details,
+        client_id: formData.client_id === '' ? null : formData.client_id
       };
 
-      const isEdit = asset?.id && asset.id !== 'new';
-
-      if (onSave) {
-        // MODO LEGACY (Delegado al padre)
-        await onSave(isEdit ? 'update' : 'create', { ...payload, id: asset.id });
+      if (isEditing) {
+        const { error } = await supabase
+          .from('assets')
+          .update(payload)
+          .eq('id', asset.id);
+        if (error) throw error;
       } else {
-        // MODO DIRECTO (Supabase)
-        if (isEdit) {
-          const { error } = await supabase.from('assets').update(payload).eq('id', asset.id);
-          if (error) throw error;
-        } else {
-          // Generar ID temporal si no existe lógica de backend
-          const insertPayload = { ...payload };
-          if (!insertPayload.identificador) insertPayload.identificador = `NEW-${Date.now()}`;
-          
-          const { error } = await supabase.from('assets').insert([insertPayload]);
-          if (error) throw error;
-        }
+        const { error } = await supabase
+          .from('assets')
+          .insert([payload]);
+        if (error) throw error;
       }
-      
-      if (onUpdate) await onUpdate(); 
-      onClose();
 
+      onUpdate();
+      onClose();
     } catch (e: any) {
       console.error(e);
-      alert('Error al guardar: ' + e.message);
+      alert("Error al guardar: " + e.message);
     } finally {
-      setInternalLoading(false);
+      setLoading(false);
     }
   };
 
   if (!isOpen) return null;
 
-  const isLoading = internalLoading || isProcessing;
-
   return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex justify-end transition-all">
-      <div className="w-full max-w-2xl bg-slate-50 h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-[#0a1e3f] w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         
         {/* HEADER */}
-        <div className="bg-[#0a1e3f] p-8 flex justify-between items-center shrink-0">
-          <div>
-            <div className="bg-[#10b981] w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20 mb-3">
-               <Package size={24} className="text-white" />
+        <div className="p-8 pb-4">
+            <div className="flex justify-between items-start">
+                <div>
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tight">
+                        {isEditing ? 'Editar Activo' : 'Nuevo Activo'}
+                    </h2>
+                    <p className="text-[#00C897] text-xs font-bold uppercase tracking-widest mt-1">
+                        Gestión de Inventario Corporativo
+                    </p>
+                </div>
+                <button onClick={onClose} className="text-white/50 hover:text-white transition-colors">
+                    <X size={32} />
+                </button>
             </div>
-            <h2 className="text-xl font-black text-white uppercase tracking-tight">
-              {asset?.id && asset.id !== 'new' ? 'Detalle Técnico del Activo' : 'Nuevo Activo'}
-            </h2>
-            <p className="text-[#10b981] text-[10px] font-black uppercase tracking-widest mt-1">
-              Gestión de Inventario Corporativo
-            </p>
-          </div>
-          <button onClick={onClose} className="text-white/50 hover:text-white transition-colors">
-            <X size={28} />
-          </button>
         </div>
 
         {/* BODY */}
-        <div className="p-8 overflow-y-auto flex-1 space-y-6">
-            
-            {/* Referencia visual */}
-            {asset?.id && asset.id !== 'new' && (
-                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-                    <div className="bg-slate-50 p-3 rounded-xl text-slate-400">
-                        <FileText size={20}/>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Organización Actual</p>
-                        <p className="text-sm font-black text-slate-700 uppercase italic">{asset.cliente_nombre || 'Sin Asignar'}</p>
+        <div className="flex-1 overflow-y-auto p-8 pt-4 bg-[#F0F4F8]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* ID */}
+                <div className="md:col-span-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3 mb-2 block flex gap-2 items-center">
+                        <QrCode size={12}/> Identificador ID
+                    </label>
+                    <div className="flex gap-2">
+                        <input 
+                            value={formData.identificador}
+                            readOnly
+                            className="w-full bg-slate-200 text-slate-600 font-black rounded-2xl px-5 py-4 outline-none border border-slate-300 cursor-not-allowed text-center tracking-widest"
+                        />
+                        {!isEditing && (
+                            <button onClick={handleRegenerateId} className="bg-white p-4 rounded-2xl text-slate-400 hover:text-[#0a1e3f] border border-slate-200 shadow-sm">
+                                <RefreshCw size={20}/>
+                            </button>
+                        )}
                     </div>
                 </div>
-            )}
 
-            <div className="grid grid-cols-2 gap-6">
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Tag size={12}/> Identificador ID
+                {/* SERIE */}
+                <div className="md:col-span-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3 mb-2 block">
+                        # Número de Serie
                     </label>
                     <input 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                        value={formData.identificador || ''}
-                        onChange={e => setFormData({...formData, identificador: e.target.value})}
-                        placeholder="EJ: LP-001"
-                    />
-                </div>
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Hash size={12}/> Número de Serie
-                    </label>
-                    <input 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                        value={formData.serie || ''}
-                        onChange={e => setFormData({...formData, serie: e.target.value})}
+                        value={formData.serie}
+                        onChange={(e) => setFormData({...formData, serie: e.target.value.toUpperCase()})}
+                        className="w-full bg-white text-[#0a1e3f] font-bold rounded-2xl px-5 py-4 outline-none border-2 border-transparent focus:border-[#00C897] transition-all shadow-sm"
                         placeholder="S/N..."
                     />
                 </div>
-            </div>
 
-            <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                    <Package size={12}/> Nombre del Activo / Equipo
-                </label>
-                <input 
-                    className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-sm font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                    value={formData.nombre_activo || ''}
-                    onChange={e => setFormData({...formData, nombre_activo: e.target.value})}
-                    placeholder="EJ: LAPTOP DELL LATITUDE"
-                />
-            </div>
-
-            {/* SELECTOR DE CLIENTES */}
-            <div className="bg-emerald-50/50 p-6 rounded-3xl border border-emerald-100">
-                <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <Building2 size={12}/> Vincular con Cliente Oficial
-                </label>
-                <div className="relative">
-                    <select 
-                        className="w-full bg-white border border-emerald-200 rounded-xl px-4 py-4 text-xs font-black text-[#0a1e3f] outline-none appearance-none cursor-pointer uppercase shadow-sm"
-                        value={formData.selectedClientId || ''}
-                        onChange={e => setFormData({...formData, selectedClientId: e.target.value})}
-                    >
-                        <option value="">-- SIN ASIGNAR (Inventario Interno) --</option>
-                        {clients.map((c: any) => (
-                            <option key={c.id} value={c.id}>
-                                {c.organization?.toUpperCase()}
-                            </option>
-                        ))}
-                    </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-600">
-                        <CheckCircle2 size={16} />
-                    </div>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <CheckCircle2 size={12}/> Estatus Operativo
-                    </label>
-                    <select 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none cursor-pointer uppercase"
-                        value={formData.estatus || 'ACTIVO'}
-                        onChange={e => setFormData({...formData, estatus: e.target.value})}
-                    >
-                        <option value="ACTIVO">ACTIVO</option>
-                        <option value="INACTIVO">INACTIVO</option>
-                        <option value="BAJA">BAJA</option>
-                        <option value="MANTENIMIENTO">EN MANTENIMIENTO</option>
-                    </select>
-                </div>
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <MapPin size={12}/> Ubicación / Detalles
+                {/* NOMBRE */}
+                <div className="md:col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3 mb-2 block">
+                        Nombre del Activo / Equipo
                     </label>
                     <input 
-                        className="w-full bg-slate-100 border border-transparent focus:bg-white focus:border-blue-200 rounded-xl px-4 py-3 text-xs font-black text-[#0a1e3f] outline-none transition-all uppercase"
-                        placeholder="N/A"
-                        value={formData.ubicacion || ''}
-                        onChange={e => setFormData({...formData, ubicacion: e.target.value})}
+                        value={formData.nombre_activo}
+                        onChange={(e) => setFormData({...formData, nombre_activo: e.target.value.toUpperCase()})}
+                        className="w-full bg-white text-[#0a1e3f] font-bold rounded-2xl px-5 py-4 outline-none border-2 border-transparent focus:border-[#00C897] transition-all shadow-sm"
+                        placeholder="EJ: EXTRACTOR..."
                     />
                 </div>
+
+                <div className="md:col-span-2 my-2 border-t border-slate-200"></div>
+
+                {/* CLIENTE (EMPRESA) - CORREGIDO */}
+                <div className="md:col-span-2">
+                    <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6">
+                        <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-4 block flex items-center gap-2">
+                            Vinculación a Empresa (Cliente)
+                        </label>
+                        <select 
+                            value={formData.client_id}
+                            onChange={(e) => setFormData({...formData, client_id: e.target.value})}
+                            className="w-full bg-white text-[#0a1e3f] font-bold rounded-xl px-5 py-4 outline-none border border-emerald-100 focus:border-[#00C897] transition-all shadow-sm cursor-pointer uppercase"
+                        >
+                            <option value="">-- SIN ASIGNAR --</option>
+                            {clients.map((c: any) => (
+                                <option key={c.id} value={c.id}>
+                                    {/* ⚠️ CORRECCIÓN: Priorizamos la organización */}
+                                    {c.organization ? c.organization : c.full_name} 
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                {/* ESTATUS Y UBICACION */}
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3 mb-2 block">
+                        Estatus
+                    </label>
+                    <select 
+                        value={formData.status}
+                        onChange={(e) => setFormData({...formData, status: e.target.value})}
+                        className="w-full bg-white text-[#0a1e3f] font-bold rounded-2xl px-5 py-4 outline-none border-2 border-transparent focus:border-[#00C897] transition-all shadow-sm"
+                    >
+                        <option value="ACTIVO">ACTIVO</option>
+                        <option value="MANTENIMIENTO">MANTENIMIENTO</option>
+                        <option value="BAJA">BAJA</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3 mb-2 block">
+                        Ubicación
+                    </label>
+                    <input 
+                        value={formData.location_details}
+                        onChange={(e) => setFormData({...formData, location_details: e.target.value.toUpperCase()})}
+                        className="w-full bg-white text-[#0a1e3f] font-bold rounded-2xl px-5 py-4 outline-none border-2 border-transparent focus:border-[#00C897] transition-all shadow-sm"
+                        placeholder="EJ: AZOTEA"
+                    />
+                </div>
+
             </div>
         </div>
 
         {/* FOOTER */}
-        <div className="p-8 border-t border-slate-100 bg-white">
+        <div className="p-6 bg-white border-t border-slate-100">
             <button 
                 onClick={handleSave}
-                disabled={isLoading}
-                className="w-full bg-[#00C897] hover:bg-emerald-400 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex justify-center items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loading}
+                className="w-full bg-[#00C897] hover:bg-[#00b085] text-[#0a1e3f] py-4 rounded-2xl font-black uppercase tracking-widest flex justify-center items-center gap-2 transition-all shadow-lg"
             >
-                {isLoading ? (
-                    <>
-                        <Loader2 size={18} className="animate-spin"/> Procesando...
-                    </>
-                ) : (
-                    <>
-                        <Save size={18} /> Guardar Cambios
-                    </>
-                )}
+                {loading ? <Loader2 className="animate-spin" /> : <><Save size={20}/> Guardar Cambios</>}
             </button>
         </div>
 

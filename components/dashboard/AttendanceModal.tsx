@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { X, Camera, MapPin, Loader2, CheckCircle2, RefreshCw, AlertTriangle, ShieldAlert } from 'lucide-react';
-import { supabase } from '@/lib/supabase-browser';
+import { supabase } from '@/lib/supabase';
 
 /* ---------------------------------------------------
    1. REGLA DE GEOCERCA (DISTANCIA)

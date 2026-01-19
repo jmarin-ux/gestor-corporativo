@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { LogOut, ChevronDown, Camera } from 'lucide-react' // ✅ Camera importada
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '@/lib/supabase-browser'
+import { supabase } from '@/lib/supabase'
 import AttendanceModal from '@/components/dashboard/AttendanceModal' // ✅ Importar Modal
 
 interface UserSession {

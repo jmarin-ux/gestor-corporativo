@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Calendar, Clock, MapPin, Eye, ArrowDown } from 'lucide-react'
-import { supabase } from '@/lib/supabase-browser'
+import { supabase } from '@/lib/supabase'
 
 // Componentes existentes
 import Header from '@/components/ui/Header' 

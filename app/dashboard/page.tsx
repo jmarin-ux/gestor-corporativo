@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase-browser';
+import { supabase } from '@/lib/supabase';
 
 // --- COMPONENTES ---
 import PlannerView from '@/components/dashboard/PlannerView';

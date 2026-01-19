@@ -4,10 +4,9 @@ import { useState, useMemo, useEffect } from 'react';
 import { 
   X, Zap, Search, CheckCircle2, 
   Box, Calendar, ClipboardList, Plus, RotateCcw, 
-  MapPin, Trash2, Lock, Loader2
+  MapPin, Trash2, Lock, Loader2, AlertTriangle
 } from 'lucide-react';
 
-// ✅ Importaciones oficiales
 import { updateTicket } from '@/lib/tickets.actions';
 import { UserRole } from '@/lib/tickets.rules';
 
@@ -32,7 +31,19 @@ export default function ServiceModal({
   /* ==========================================================
      🔒 LÓGICA DE BLINDAJE (MODO SOLO LECTURA)
      ========================================================== */
-  const isReadOnly = userRole === 'cliente' || userRole === 'operativo';
+  
+  // 1. Normalizar estatus actual (si existe ticket)
+  const currentStatus = (ticket?.status || '').toLowerCase().trim();
+  
+  // 2. Definir estatus que bloquean la edición
+  const LOCKED_STATUSES = ['realizado', 'ejecutado', 'revision_interna', 'cerrado', 'cancelado'];
+  
+  // 3. ¿Está bloqueado por estatus? (Si es estatus final Y NO soy superadmin)
+  const isStatusLocked = isEditing && LOCKED_STATUSES.includes(currentStatus) && userRole !== 'superadmin';
+
+  // 4. Definir si es Solo Lectura (Por Rol O Por Estatus)
+  const isReadOnly = userRole === 'cliente' || userRole === 'operativo' || isStatusLocked;
+
   const canAssignCoordinator = userRole === 'superadmin' || userRole === 'admin';
 
   const [form, setForm] = useState({
@@ -237,9 +248,16 @@ export default function ServiceModal({
           <button onClick={onClose} className="hover:bg-slate-50 p-2 rounded-full text-slate-400 transition-colors"><X size={20}/></button>
         </div>
 
+        {/* 🔒 BANNER DE BLOQUEO */}
         {isReadOnly && (
-          <div className="bg-blue-50 border-b border-blue-100 p-3 text-blue-700 text-[10px] font-black uppercase text-center tracking-widest">
-            Modo solo lectura - La edición de parámetros técnicos está restringida
+          <div className={`p-3 text-[10px] font-black uppercase text-center tracking-widest flex items-center justify-center gap-2 ${isStatusLocked ? 'bg-rose-50 text-rose-600 border-b border-rose-100' : 'bg-blue-50 text-blue-700 border-b border-blue-100'}`}>
+            {isStatusLocked ? (
+                <>
+                    <Lock size={12}/> Servicio finalizado - Edición bloqueada por sistema
+                </>
+            ) : (
+                "Modo solo lectura"
+            )}
           </div>
         )}
 
@@ -334,18 +352,18 @@ export default function ServiceModal({
           </div>
 
           <div className="flex-1 p-6 flex flex-col overflow-hidden bg-slate-50/30">
-             <div className="relative mb-4">
-               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-               <input 
-                 disabled={isReadOnly}
-                 className="w-full bg-white border border-slate-200 rounded-2xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-50 shadow-sm disabled:opacity-50"
-                 placeholder={isReadOnly ? "Activos vinculados" : "Buscar activo..."}
-                 value={assetSearchTerm}
-                 onChange={e => setAssetSearchTerm(e.target.value)}
-               />
-             </div>
+              <div className="relative mb-4">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                <input 
+                  disabled={isReadOnly}
+                  className="w-full bg-white border border-slate-200 rounded-2xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-50 shadow-sm disabled:opacity-50"
+                  placeholder={isReadOnly ? "Activos vinculados" : "Buscar activo..."}
+                  value={assetSearchTerm}
+                  onChange={e => setAssetSearchTerm(e.target.value)}
+                />
+              </div>
 
-             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+              <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
                 {stagedAsset && (
                   <div className="bg-blue-600 p-3 rounded-xl shadow-lg flex justify-between items-center mb-4 text-white">
                     <div className="flex items-center gap-3">

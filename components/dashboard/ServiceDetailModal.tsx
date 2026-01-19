@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { 
   X, Save, Calendar, User, MapPin, Building2, 
   MessageSquare, Clock, CheckCircle2, HardHat, Users, 
-  ClipboardCheck, FileText, RotateCcw, UserCog
+  ClipboardCheck, FileText, RotateCcw, UserCog, Lock
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 
@@ -45,27 +45,33 @@ export default function ServiceDetailModal({
   const [actionsDone, setActionsDone] = useState(ticket?.service_done_comment || ''); 
 
   // --- FILTROS DE PERSONAL ---
-  
-  // 1. Coordinadores (Para Admin/Superadmin)
-  // Incluimos coordinadores, admins y superadmins como posibles asignados a coordinar
   const coordinatorsList = staff.filter(u => {
       const r = (u.role || '').toLowerCase();
       return ['coordinador', 'admin', 'superadmin'].includes(r);
   });
 
-  // 2. Operativos (Líderes y Auxiliares)
   const operativesOnly = staff.filter(u => (u.role || '').toLowerCase() === 'operativo');
-  
   const leaders = operativesOnly.filter(u => cleanText(u.position + ' ' + u.technical_level).includes('lider'));
   const auxiliaries = operativesOnly.filter(u => !cleanText(u.position + ' ' + u.technical_level).includes('lider'));
 
-  // --- PERMISOS ---
+  // --- PERMISOS Y BLOQUEO DE SEGURIDAD ---
   const role = (currentUser?.role || '').toLowerCase().trim();
   
-  // Permisos Generales
+  // 1. Normalizar estatus actual para verificar bloqueo
+  const currentStatusLower = (ticket?.status || '').toLowerCase().trim();
+  const lockedStatuses = ['realizado', 'ejecutado', 'revision_interna', 'cerrado', 'cancelado'];
+
+  // 🔒 BLOQUEO MAESTRO: Si está en estatus final y NO soy superadmin, todo se bloquea.
+  const isStatusLocked = lockedStatuses.includes(currentStatusLower) && role !== 'superadmin';
+
+  // Permisos base (si no está bloqueado por estatus)
   const isSuperOrAdmin = ['admin', 'superadmin'].includes(role);
-  const canEdit = ['admin', 'superadmin', 'coordinador'].includes(role);
-  const canEditReport = ['admin', 'superadmin', 'coordinador', 'operativo'].includes(role);
+  const canEditBase = ['admin', 'superadmin', 'coordinador'].includes(role);
+  const canEditReportBase = ['admin', 'superadmin', 'coordinador', 'operativo'].includes(role);
+
+  // Permisos Finales (Aplicando el bloqueo)
+  const canEdit = canEditBase && !isStatusLocked;
+  const canEditReport = canEditReportBase && !isStatusLocked;
 
   const availableStatuses = useMemo(() => {
       const options = [
@@ -119,11 +125,18 @@ export default function ServiceDetailModal({
       finally { setLoading(false); }
   };
 
-  // --- GUARDAR NORMAL ---
+  // --- GUARDAR ---
   const handleSave = async () => {
+    // Alerta de seguridad crítica
+    if ((status === 'revision_interna' || status === 'realizado') && role !== 'superadmin') {
+        const confirmSave = confirm("⚠️ ALERTA DE BLOQUEO \n\nAl cambiar el estatus a TERMINADO, este ticket se bloqueará y ya no podrás editarlo. ¿Continuar?");
+        if (!confirmSave) return;
+    }
+
     setLoading(true);
     try {
         let finalStatus = status;
+        // Auto-asignación de estatus si asignan fecha y líder
         if (scheduledDate && selectedLeader && status === 'pendiente') {
             finalStatus = 'in_progress';
         }
@@ -131,15 +144,12 @@ export default function ServiceDetailModal({
         const updates: any = {
             status: finalStatus,
             updated_at: new Date().toISOString(),
-            // Coordinación
             coordinator_id: selectedCoordinator || null,
-            coordinador_id: selectedCoordinator || null, // Compatibilidad
-            // Operativo
+            coordinador_id: selectedCoordinator || null,
             scheduled_date: scheduledDate || null,
             technical_lead_id: selectedLeader || null,
             leader_id: selectedLeader || null,
             auxiliary_id: selectedAux || null,
-            // Reporte
             technical_result: findings,
             service_done_comment: actionsDone
         };
@@ -194,6 +204,13 @@ export default function ServiceDetailModal({
             <X size={24} />
           </button>
         </div>
+
+        {/* BANNER DE BLOQUEO */}
+        {isStatusLocked && (
+            <div className="bg-rose-50 border-b border-rose-100 p-3 text-center text-[10px] font-black uppercase text-rose-600 tracking-widest flex items-center justify-center gap-2">
+                <Lock size={12}/> Servicio Finalizado - Edición Bloqueada por Sistema
+            </div>
+        )}
 
         {/* BODY */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
@@ -258,9 +275,10 @@ export default function ServiceDetailModal({
                                 <div className="relative">
                                     <UserCog className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400" size={16}/>
                                     <select 
+                                        disabled={isStatusLocked && role !== 'superadmin'}
                                         value={selectedCoordinator}
                                         onChange={(e) => setSelectedCoordinator(e.target.value)}
-                                        className="w-full bg-indigo-50/50 border border-indigo-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-indigo-500 transition-all appearance-none uppercase cursor-pointer"
+                                        className="w-full bg-indigo-50/50 border border-indigo-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-indigo-500 transition-all appearance-none uppercase cursor-pointer disabled:opacity-50"
                                     >
                                         <option value="">-- Sin Asignar --</option>
                                         {coordinatorsList.map(c => (
@@ -289,7 +307,7 @@ export default function ServiceDetailModal({
                                         disabled={!canEdit}
                                         value={scheduledDate}
                                         onChange={(e) => setScheduledDate(e.target.value)}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 transition-all uppercase"
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 transition-all uppercase disabled:opacity-50"
                                     />
                                 </div>
                             </div>
@@ -302,7 +320,7 @@ export default function ServiceDetailModal({
                                         disabled={!canEdit}
                                         value={selectedLeader}
                                         onChange={(e) => setSelectedLeader(e.target.value)}
-                                        className="w-full bg-emerald-50/50 border border-emerald-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 transition-all appearance-none uppercase cursor-pointer"
+                                        className="w-full bg-emerald-50/50 border border-emerald-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 transition-all appearance-none uppercase cursor-pointer disabled:opacity-50"
                                     >
                                         <option value="">-- Sin Asignar --</option>
                                         {leaders.map(l => <option key={l.id} value={l.id}>{l.full_name}</option>)}
@@ -318,7 +336,7 @@ export default function ServiceDetailModal({
                                         disabled={!canEdit}
                                         value={selectedAux}
                                         onChange={(e) => setSelectedAux(e.target.value)}
-                                        className="w-full bg-amber-50/50 border border-amber-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-amber-500 transition-all appearance-none uppercase cursor-pointer"
+                                        className="w-full bg-amber-50/50 border border-amber-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-amber-500 transition-all appearance-none uppercase cursor-pointer disabled:opacity-50"
                                     >
                                         <option value="">-- Sin Auxiliar --</option>
                                         {auxiliaries.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
@@ -326,8 +344,8 @@ export default function ServiceDetailModal({
                                 </div>
                             </div>
 
-                            {/* BOTÓN: REGRESAR A PENDIENTES */}
-                            {canEdit && (scheduledDate || selectedLeader) && (
+                            {/* BOTÓN: REGRESAR A PENDIENTES (Solo si no está bloqueado) */}
+                            {canEdit && (scheduledDate || selectedLeader) && !isStatusLocked && (
                                 <button 
                                     onClick={handleReturnToPending}
                                     className="w-full py-2 bg-red-50 text-red-500 border border-red-100 rounded-xl text-[10px] font-black uppercase hover:bg-red-100 transition-all flex items-center justify-center gap-2 mt-4"
@@ -351,7 +369,7 @@ export default function ServiceDetailModal({
                                 <textarea 
                                     disabled={!canEditReport}
                                     placeholder="¿Qué se encontró al revisar?" 
-                                    className="w-full bg-purple-50/30 border border-purple-100 rounded-xl p-3 text-xs font-medium outline-none h-20 resize-none focus:bg-white focus:border-purple-300 transition-all"
+                                    className="w-full bg-purple-50/30 border border-purple-100 rounded-xl p-3 text-xs font-medium outline-none h-20 resize-none focus:bg-white focus:border-purple-300 transition-all disabled:opacity-50"
                                     value={findings}
                                     onChange={(e) => setFindings(e.target.value)}
                                 />
@@ -363,7 +381,7 @@ export default function ServiceDetailModal({
                                 <textarea 
                                     disabled={!canEditReport}
                                     placeholder="¿Qué solución se aplicó?" 
-                                    className="w-full bg-emerald-50/30 border border-emerald-100 rounded-xl p-3 text-xs font-medium outline-none h-20 resize-none focus:bg-white focus:border-emerald-300 transition-all"
+                                    className="w-full bg-emerald-50/30 border border-emerald-100 rounded-xl p-3 text-xs font-medium outline-none h-20 resize-none focus:bg-white focus:border-emerald-300 transition-all disabled:opacity-50"
                                     value={actionsDone}
                                     onChange={(e) => setActionsDone(e.target.value)}
                                 />
@@ -380,7 +398,7 @@ export default function ServiceDetailModal({
                                     disabled={!canEdit}
                                     value={status}
                                     onChange={(e) => setStatus(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold outline-none uppercase cursor-pointer"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold outline-none uppercase cursor-pointer disabled:opacity-50"
                                 >
                                     {!availableStatuses.find(opt => opt.value === status) && (
                                         <option value={status}>{status.toUpperCase()}</option>
@@ -395,16 +413,18 @@ export default function ServiceDetailModal({
                                 <textarea 
                                     disabled={!canEdit}
                                     placeholder="Nota sobre el cambio..." 
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none h-14 resize-none"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none h-14 resize-none disabled:opacity-50"
                                     value={notes}
                                     onChange={(e) => setNotes(e.target.value)}
                                 />
                             </div>
-                            {(canEdit || canEditReport) && (
+                            
+                            {/* BOTÓN GUARDAR (SOLO SI NO ESTÁ BLOQUEADO) */}
+                            {(!isStatusLocked || role === 'superadmin') && (canEdit || canEditReport) && (
                                 <button 
                                     onClick={handleSave} 
                                     disabled={loading}
-                                    className="w-full bg-[#00C897] hover:bg-[#00b085] text-[#0a1e3f] font-black uppercase py-4 rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                    className="w-full bg-[#00C897] hover:bg-[#00b085] text-[#0a1e3f] font-black uppercase py-4 rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
                                 >
                                     {loading ? <CheckCircle2 className="animate-spin"/> : <Save size={18}/>}
                                     Guardar Cambios

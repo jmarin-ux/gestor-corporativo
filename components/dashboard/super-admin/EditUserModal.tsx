@@ -1,220 +1,170 @@
 'use client';
 
-import { useState } from 'react';
-import { X, Save, ShieldCheck, Lock } from 'lucide-react';
-import { supabase } from '../../../lib/supabase';
+import { useState, useEffect } from 'react';
+import { 
+  X, Save, User, Mail, Shield, Briefcase, 
+  Loader2, CheckCircle2, AlertTriangle 
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase-browser';
 
-export default function EditUserModal({ 
-  user, 
-  currentUser, 
-  onClose, 
-  onSave, 
-  isProcessing: externalProcessing 
-}: any) {
+export default function EditUserModal({ isOpen, onClose, user, onUpdate }: any) {
+  const [loading, setLoading] = useState(false);
   
-  const [isProcessing, setIsProcessing] = useState(false);
-  
-  // Cálculo de permisos según el usuario logueado
-  const isSuperAdmin = currentUser?.role === 'superadmin';
-  const isReadOnly = !isSuperAdmin;
-
+  // Formulario
   const [formData, setFormData] = useState({
-    full_name: (user.full_name || '').toUpperCase(),
-    role: user.role || 'operativo',
-    technical_level: user.technical_level || 'auxiliar',
-    email: user.email || '',
-    phone: user.phone || '',
-    password: user.password || '',
-    pin: user.pin || '',
+    full_name: '',
+    email: '', // El email suele ser read-only porque está ligado a Auth
+    role: '',
+    position: '', // Cargo (ej: Líder de Mantenimiento)
+    phone: ''
   });
 
-  // Identificación del tipo de registro
-  const isClient = user.type === 'client' || user.role === 'client' || user.role === 'cliente';
+  // Cargar datos al abrir
+  useEffect(() => {
+    if (isOpen && user) {
+      setFormData({
+        full_name: user.full_name || '',
+        email: user.email || '',
+        role: user.role || 'operativo',
+        position: user.position || '', // Asegúrate de que tu tabla tenga esta columna o usa 'job_title'
+        phone: user.phone || ''
+      });
+    }
+  }, [isOpen, user]);
 
-  const handleLocalSave = async () => {
-    if (isReadOnly) return;
+  const handleSave = async () => {
+    if (!user?.id) return;
+    setLoading(true);
 
-    setIsProcessing(true);
     try {
-      const targetTable = isClient ? 'clients' : 'profiles';
-      
-      const updateData: any = {
-        full_name: formData.full_name.toUpperCase(),
-        phone: formData.phone,
-        password: formData.password,
-      };
-
-      // 🔒 Solo staff tiene nivel técnico y PIN de kiosco
-      // 🔒 El rol solo se actualiza si NO es cliente (evita inconsistencias)
-      if (!isClient) {
-        updateData.role = formData.role;
-        updateData.pin = formData.pin;
-        updateData.technical_level = formData.technical_level;
-      }
-
-      const { error: dbError } = await supabase
-        .from(targetTable)
-        .update(updateData)
+      // 1. Actualizar en la tabla profiles
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: formData.full_name,
+          role: formData.role, // Aquí cambiamos el rol (superadmin, coordinador, etc)
+          position: formData.position,
+          phone: formData.phone,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', user.id);
 
-      if (dbError) throw dbError;
+      if (error) throw error;
 
-      if (onSave) {
-        await onSave('update', { 
-          ...user, 
-          ...formData,
-          full_name: formData.full_name.toUpperCase(),
-          type: isClient ? 'client' : 'staff'
-        });
-      }
-      
+      alert("✅ Usuario actualizado correctamente");
+      if (onUpdate) onUpdate();
       onClose();
-    } catch (error: any) {
-      console.error("Error crítico:", error);
-      alert("❌ ERROR AL GUARDAR: " + error.message);
+
+    } catch (e: any) {
+      console.error(e);
+      alert("Error al actualizar: " + e.message);
     } finally {
-      setIsProcessing(false);
+      setLoading(false);
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95">
         
-        {/* Header */}
-        <div className="bg-[#0a1e3f] px-8 py-6 text-white flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <ShieldCheck className="text-[#00C897]" size={24} />
-            <h2 className="text-xl font-black uppercase tracking-tighter">
-              {isClient ? 'Perfil de Cliente' : 'Gestión de Staff'}
-            </h2>
+        {/* HEADER */}
+        <div className="bg-[#0a1e3f] p-6 flex justify-between items-center text-white">
+          <div>
+            <h2 className="text-xl font-black uppercase tracking-tight">Editar Personal</h2>
+            <p className="text-[10px] text-blue-200 font-bold uppercase mt-1">ID: {user?.id?.slice(0,8)}</p>
           </div>
-          <button onClick={onClose} className="hover:bg-white/10 p-2 rounded-full transition-colors"><X size={24} /></button>
+          <button onClick={onClose} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><X size={20}/></button>
         </div>
 
-        <div className="p-8 space-y-5">
-          {/* Fila: Nombre y Nivel Técnico */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">Nombre Completo</label>
-              <input 
-                disabled={isReadOnly} 
-                className={`w-full bg-[#EEF2F6] text-slate-700 font-black text-xs rounded-xl py-4 px-4 outline-none uppercase ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`} 
-                value={formData.full_name} 
-                onChange={(e) => setFormData({...formData, full_name: e.target.value.toUpperCase()})} 
-              />
-            </div>
+        {/* BODY */}
+        <div className="p-8 space-y-6">
             
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">
-                {isClient ? 'Tipo de Registro' : 'Cargo / Nivel'}
-              </label>
-              {isClient ? (
-                <div className="w-full bg-slate-100 text-slate-400 font-black text-[10px] rounded-xl py-4 px-4 uppercase">
-                  CLIENTE EXTERNO
+            {/* Nombre */}
+            <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Nombre Completo</label>
+                <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                    <input 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-[#0a1e3f] uppercase transition-all"
+                        value={formData.full_name}
+                        onChange={(e) => setFormData({...formData, full_name: e.target.value.toUpperCase()})}
+                    />
                 </div>
-              ) : (
-                <select 
-                  disabled={isReadOnly} 
-                  className={`w-full bg-[#EEF2F6] font-black text-xs rounded-xl py-4 px-4 outline-none uppercase border-r-8 border-transparent ${isReadOnly ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`} 
-                  value={formData.technical_level} 
-                  onChange={(e) => setFormData({...formData, technical_level: e.target.value})} 
-                >
-                  <option value="lider">LÍDER DE EQUIPO</option>
-                  <option value="auxiliar">AUXILIAR TÉCNICO</option>
-                </select>
-              )}
             </div>
-          </div>
 
-          {/* Fila: Rol (Oculto para Clientes) y Teléfono */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">Identificador de Acceso</label>
-              {isClient ? (
-                <div className="w-full bg-blue-50 text-blue-600 font-black text-xs rounded-xl py-4 px-4 uppercase border border-blue-100">
-                  PORTAL CLIENTES
+            {/* Email (Solo Lectura) */}
+            <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Correo Electrónico (Sistema)</label>
+                <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                    <input 
+                        disabled
+                        className="w-full bg-slate-100 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-xs font-bold text-slate-500 outline-none cursor-not-allowed"
+                        value={formData.email}
+                    />
                 </div>
-              ) : (
-                <select 
-                  disabled={isReadOnly} 
-                  className={`w-full font-black text-xs rounded-xl py-4 px-4 outline-none uppercase border-r-8 border-transparent ${isReadOnly ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-[#EEF2F6]'}`} 
-                  value={formData.role}
-                  onChange={(e) => setFormData({...formData, role: e.target.value})}
-                >
-                  <option value="superadmin">SUPERADMIN</option>
-                  <option value="admin">ADMINISTRADOR</option>
-                  <option value="coordinador">COORDINADOR</option>
-                  <option value="operativo">OPERATIVO</option>
-                </select>
-              )}
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">Teléfono</label>
-              <input 
-                disabled={isReadOnly}
-                className={`w-full bg-[#EEF2F6] text-slate-700 font-bold text-xs rounded-xl py-4 px-4 outline-none ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`} 
-                value={formData.phone} 
-                onChange={(e) => setFormData({...formData, phone: e.target.value})} 
-              />
-            </div>
-          </div>
 
-          {/* Email (Siempre bloqueado por integridad de la cuenta) */}
-          <div className="space-y-1">
-             <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">Correo Electrónico Principal</label>
-             <input 
-                disabled 
-                className="w-full bg-slate-100 text-slate-500 font-bold text-xs rounded-xl py-4 px-4 outline-none cursor-not-allowed" 
-                value={formData.email} 
-             />
-          </div>
+            <div className="grid grid-cols-2 gap-4">
+                {/* ROL */}
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Rol de Sistema</label>
+                    <div className="relative">
+                        <Shield className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-500" size={18}/>
+                        <select 
+                            className="w-full bg-indigo-50/50 border border-indigo-100 rounded-xl py-3 pl-12 pr-4 text-xs font-black text-indigo-900 outline-none focus:border-indigo-500 uppercase cursor-pointer appearance-none"
+                            value={formData.role}
+                            onChange={(e) => setFormData({...formData, role: e.target.value})}
+                        >
+                            <option value="operativo">Operativo</option>
+                            <option value="coordinador">Coordinador</option>
+                            <option value="admin">Administrador</option>
+                            <option value="superadmin">Super Admin</option>
+                            <option value="kiosk_master">Kiosco Master</option>
+                        </select>
+                    </div>
+                </div>
 
-          {/* Fila: Password y PIN */}
-          <div className={`grid grid-cols-2 gap-4 p-4 rounded-3xl border transition-all ${isReadOnly ? 'bg-slate-50' : 'bg-emerald-50/50 border-emerald-100'}`}>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase tracking-widest pl-1 text-slate-400">Contraseña</label>
-              <div className="relative">
-                <input 
-                  disabled={isReadOnly}
-                  type="text"
-                  className={`w-full font-bold text-xs rounded-xl py-4 px-4 outline-none border ${isReadOnly ? 'bg-white text-slate-300 cursor-not-allowed' : 'bg-white border-emerald-50 text-slate-700'}`} 
-                  value={isReadOnly ? '********' : formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
-                />
-                <Lock size={14} className="absolute right-3 top-4 text-slate-300" />
-              </div>
+                {/* CARGO / POSICIÓN */}
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Cargo / Puesto</label>
+                    <div className="relative">
+                        <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={18}/>
+                        <input 
+                            className="w-full bg-emerald-50/50 border border-emerald-100 rounded-xl py-3 pl-12 pr-4 text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 uppercase transition-all"
+                            placeholder="EJ: LIDER, AUXILIAR..."
+                            value={formData.position}
+                            onChange={(e) => setFormData({...formData, position: e.target.value.toUpperCase()})}
+                        />
+                    </div>
+                </div>
             </div>
-            <div className="space-y-1">
-              <label className={`text-[10px] font-black uppercase tracking-widest pl-1 ${isReadOnly || isClient ? 'text-slate-400' : 'text-[#00C897]'}`}>Pin Kiosco</label>
-              <input 
-                disabled={isReadOnly || isClient} 
-                className={`w-full font-black text-center text-sm rounded-xl py-4 outline-none border ${isReadOnly || isClient ? 'bg-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-emerald-50'}`} 
-                value={isReadOnly || isClient ? '••••' : formData.pin} 
-                maxLength={4} 
-                onChange={(e) => setFormData({...formData, pin: e.target.value})} 
-              />
-            </div>
-          </div>
 
-          {/* Botón Final */}
-          {isSuperAdmin ? (
-            <button 
-              onClick={handleLocalSave} 
-              disabled={isProcessing || externalProcessing} 
-              className="w-full bg-[#00C897] hover:bg-[#00C897]/90 text-white font-black py-5 rounded-2xl shadow-xl transition-all active:scale-95 uppercase text-xs tracking-widest flex items-center justify-center gap-3"
-            >
-              {isProcessing ? "SINCRONIZANDO DB..." : <><Save size={18}/> GUARDAR CAMBIOS MAESTROS</>}
-            </button>
-          ) : (
-            <div className="text-center space-y-2">
-              <div className="bg-slate-100 p-4 rounded-2xl">
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Vista de Solo Lectura</p>
-              </div>
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Solo el SuperAdmin puede modificar este registro</p>
+            {/* AVISO */}
+            <div className="bg-amber-50 p-4 rounded-xl flex gap-3 items-center border border-amber-100">
+                <AlertTriangle className="text-amber-500 shrink-0" size={20}/>
+                <p className="text-[10px] text-amber-700 font-bold leading-tight">
+                    ATENCIÓN: Cambiar el rol modificará inmediatamente los permisos de acceso de este usuario.
+                </p>
             </div>
-          )}
+
         </div>
+
+        {/* FOOTER */}
+        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+            <button onClick={onClose} className="px-6 py-3 rounded-xl text-xs font-black text-slate-400 hover:bg-slate-200 uppercase transition-colors">Cancelar</button>
+            <button 
+                onClick={handleSave} 
+                disabled={loading}
+                className="bg-[#0a1e3f] text-white px-8 py-3 rounded-xl font-black text-xs uppercase shadow-lg hover:bg-blue-900 transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+                {loading ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>} 
+                Guardar Cambios
+            </button>
+        </div>
+
       </div>
     </div>
   );

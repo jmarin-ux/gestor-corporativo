@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase-browser'
-import { CalendarDays, ChevronLeft, ChevronRight, Loader2, CheckCircle2, X, MessageSquareText, LogOut } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Loader2, CheckCircle2, X, MessageSquareText, LogOut, MapPin, Hash } from 'lucide-react'
 
 type AssignmentRow = {
   id: string
@@ -53,6 +53,8 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
   const router = useRouter()
 
   const userId = (currentUser?.id || '').toString()
+  
+  // Verificación de Líder (Role o Position)
   const isLeader =
     (currentUser?.crew_role || '').toString().toLowerCase().trim() === 'lider' ||
     (currentUser?.position || '').toString().toUpperCase().includes('LIDER')
@@ -118,7 +120,7 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
       const start = toYMD(monday)
       const end = toYMD(sunday)
 
-      // 1) assignments de la semana, donde yo soy líder o auxiliar
+      // 1) assignments de la semana
       const { data: aData, error: aErr } = await supabase
         .from('assignments')
         .select('id, work_date, leader_id, auxiliary_id, ticket_id, site_id, service_type, details')
@@ -167,7 +169,6 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
       setRows(merged)
     } catch (e: any) {
       console.error('OperativeView fetchWeek error:', e?.message)
-      alert(e?.message || 'Error cargando asignaciones')
     } finally {
       setLoading(false)
     }
@@ -182,10 +183,7 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
     try {
       await supabase.auth.signOut()
     } catch {}
-    ;['kiosk_device_user', 'client_user', 'kiosco_user', 'kiosk_user', 'kiosk_session'].forEach((k) =>
-      localStorage.removeItem(k)
-    )
-    router.replace('/accesos/kiosk')
+    router.replace('/login')
   }
 
   function openFinish(t: TicketRow) {
@@ -194,6 +192,7 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
     setFinishOpen(true)
   }
 
+  // --- FINALIZAR TICKET (CORREGIDO A 'realizado') ---
   async function confirmFinish() {
     if (!finishTicket?.id) return
     setSavingFinish(true)
@@ -202,7 +201,7 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
       const { error } = await supabase
         .from('tickets')
         .update({
-          status: 'Ejecutado',
+          status: 'realizado', // 🟢 UNIFICADO: Minúsculas para coincidir con Admin
           service_done_at: new Date().toISOString(),
           service_done_by: userId,
           service_done_comment: finishComment?.trim() || null,
@@ -214,7 +213,7 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
       setFinishOpen(false)
       setFinishTicket(null)
       setFinishComment('')
-      await fetchWeek()
+      await fetchWeek() // Recargar para ver el cambio
     } catch (e: any) {
       alert(e?.message || 'Error al finalizar servicio')
     } finally {
@@ -222,139 +221,125 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
     }
   }
 
+  // Helper de Estatus Visual
+  const getStatusBadge = (statusRaw: string | null) => {
+      const s = (statusRaw || '').toLowerCase();
+      
+      if (['realizado', 'ejecutado'].includes(s)) 
+        return <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">REALIZADO</span>;
+      
+      if (['revision_interna'].includes(s)) 
+        return <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">EN REVISIÓN</span>;
+      
+      if (['cerrado'].includes(s)) 
+        return <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[9px] font-black uppercase">CERRADO</span>;
+
+      // Por defecto
+      return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">EN PROCESO</span>;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-100 p-6 md:p-10 space-y-6">
+    <div className="min-h-screen bg-slate-100 p-4 md:p-8 space-y-6 pb-20">
+      
       {/* Header */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="p-3 rounded-2xl bg-[#0a1e3f] text-white">
-            <CalendarDays size={22} />
+          <div className="p-3 rounded-2xl bg-[#0a1e3f] text-white shadow-lg shadow-blue-900/20">
+            <CalendarDays size={24} />
           </div>
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Panel Operativo</p>
-            <h2 className="text-xl md:text-2xl font-black text-slate-800 uppercase leading-tight">
-              {currentUser?.full_name || currentUser?.email || 'Operativo'}
+            <h2 className="text-xl font-black text-[#0a1e3f] uppercase leading-tight">
+              {currentUser?.full_name || 'Técnico'}
             </h2>
-            <p className="text-xs font-bold text-slate-500">
-              Semana: {monday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} –{' '}
-              {sunday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} •{' '}
-              <span className="text-slate-800">{totalWeek}</span> servicios
-            </p>
-            <p className="text-[10px] font-black uppercase tracking-widest mt-1">
-              <span className={`px-3 py-1 rounded-full ${isLeader ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
-                {isLeader ? 'LÍDER' : 'AUXILIAR'}
-              </span>
-            </p>
+            <div className="flex gap-2 mt-1">
+                <span className={`px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${isLeader ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {isLeader ? 'LÍDER DE CUADRILLA' : 'AUXILIAR TÉCNICO'}
+                </span>
+                <span className="px-3 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-wider">
+                    {totalWeek} SERVICIOS
+                </span>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setWeekBase(new Date(weekBase.setDate(weekBase.getDate() - 7)))}
-            className="px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:bg-white"
-          >
-            <ChevronLeft size={16} />
-          </button>
-
-          <button
-            onClick={() => setWeekBase(new Date(weekBase.setDate(weekBase.getDate() + 7)))}
-            className="px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:bg-white"
-          >
-            <ChevronRight size={16} />
-          </button>
-
-          <button
-            onClick={fetchWeek}
-            className="px-6 py-3 rounded-2xl bg-[#0a1e3f] text-white font-black text-[10px] uppercase tracking-widest hover:opacity-95"
-          >
-            {loading ? 'Cargando…' : 'Actualizar'}
-          </button>
-
-          <button
-            onClick={logout}
-            className="px-5 py-3 rounded-2xl bg-white border border-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 inline-flex items-center gap-2"
-          >
-            <LogOut size={14} /> Salir
-          </button>
+        <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl w-full md:w-auto">
+          <button onClick={() => setWeekBase(new Date(weekBase.setDate(weekBase.getDate() - 7)))} className="p-3 rounded-xl bg-white text-slate-600 hover:bg-slate-100 border border-slate-200 shadow-sm transition-all"><ChevronLeft size={16} /></button>
+          <div className="flex-1 text-center px-4">
+             <p className="text-[10px] font-black text-slate-400 uppercase">SEMANA</p>
+             <p className="text-xs font-black text-[#0a1e3f] uppercase whitespace-nowrap">
+                {monday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} - {sunday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+             </p>
+          </div>
+          <button onClick={() => setWeekBase(new Date(weekBase.setDate(weekBase.getDate() + 7)))} className="p-3 rounded-xl bg-white text-slate-600 hover:bg-slate-100 border border-slate-200 shadow-sm transition-all"><ChevronRight size={16} /></button>
         </div>
+        
+        <button onClick={logout} className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors"><LogOut size={20}/></button>
       </div>
 
-      {/* Calendar */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-            Calendario (solo lectura)
-          </p>
-          {loading && (
-            <div className="text-slate-400 font-black text-[10px] uppercase tracking-widest inline-flex items-center gap-2">
-              <Loader2 className="animate-spin" size={14} /> sincronizando
-            </div>
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <div className="min-w-[1100px] grid grid-cols-7 gap-4 p-6">
+      {/* Calendar Grid */}
+      <div className="overflow-x-auto pb-4">
+        <div className="min-w-[1000px] grid grid-cols-7 gap-4">
             {weekDays.map((d) => {
               const date = new Date(monday)
               date.setDate(monday.getDate() + d.idx)
               const ymd = toYMD(date)
               const cards = board[ymd] || []
+              const isToday = toYMD(new Date()) === ymd;
 
               return (
-                <div key={d.label} className="bg-slate-50/60 rounded-[2rem] border border-slate-100 overflow-hidden">
-                  <div className="p-4 bg-white border-b border-slate-100">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{d.label}</p>
-                    <p className="text-sm font-black text-slate-800">{date.getDate()}</p>
+                <div key={d.label} className={`rounded-[2rem] border overflow-hidden flex flex-col h-full min-h-[300px] ${isToday ? 'bg-white border-blue-200 ring-2 ring-blue-100' : 'bg-slate-50/50 border-slate-200'}`}>
+                  
+                  {/* Header Día */}
+                  <div className={`p-3 text-center border-b ${isToday ? 'bg-blue-50 border-blue-100' : 'bg-white border-slate-100'}`}>
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${isToday ? 'text-blue-600' : 'text-slate-400'}`}>{d.label}</p>
+                    <p className={`text-lg font-black ${isToday ? 'text-blue-800' : 'text-slate-700'}`}>{date.getDate()}</p>
                   </div>
 
-                  <div className="p-3 space-y-3 min-h-[220px]">
+                  {/* Tarjetas */}
+                  <div className="p-2 space-y-3 flex-1">
                     {cards.length === 0 ? (
-                      <div className="text-center text-slate-300 text-[10px] font-black uppercase py-8">
-                        Sin servicios
+                      <div className="h-full flex items-center justify-center opacity-30">
+                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full"></div>
                       </div>
                     ) : (
                       cards.map((c: any) => {
                         const t = c.ticket as TicketRow | null
                         const s = c.site as SiteRow | null
-                        const status = (t?.status || '').toString().toLowerCase()
+                        const status = (t?.status || '').toLowerCase()
+                        const isDone = ['realizado', 'ejecutado', 'revision_interna', 'cerrado'].includes(status);
 
                         return (
-                          <div key={c.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-black text-blue-600 uppercase truncate">
-                                  {t?.codigo_servicio ? `#${t.codigo_servicio}` : `#${t?.id ?? 'SIN TICKET'}`}
-                                </p>
-                                <p className="text-xs font-black text-slate-800 uppercase truncate">
-                                  {s?.name || t?.company || 'Servicio'}
-                                </p>
-                                <p className="text-[11px] font-bold text-slate-500 truncate">
-                                  {c.service_type || t?.service_type || '—'}
-                                </p>
-                                <p className="text-[10px] font-bold text-slate-400 mt-1 truncate">
-                                  {t?.location || '—'}
-                                </p>
-                              </div>
-
-                              <span
-                                className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-black uppercase ${
-                                  status === 'ejecutado'
-                                    ? 'bg-emerald-50 text-emerald-700'
-                                    : status === 'en proceso'
-                                    ? 'bg-blue-50 text-blue-700'
-                                    : 'bg-slate-100 text-slate-500'
-                                }`}
-                              >
-                                {t?.status || 'ASIGNADO'}
-                              </span>
+                          <div key={c.id} className={`bg-white rounded-2xl p-4 shadow-sm border transition-all hover:shadow-md flex flex-col gap-3 ${isDone ? 'border-emerald-100 opacity-80' : 'border-slate-200'}`}>
+                            
+                            {/* Cabecera Tarjeta */}
+                            <div className="flex justify-between items-start">
+                                <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[9px] font-bold flex items-center gap-1">
+                                    <Hash size={10}/> {t?.codigo_servicio || '---'}
+                                </span>
+                                {getStatusBadge(status)}
                             </div>
 
-                            {isLeader && t?.id && status !== 'ejecutado' && (
+                            {/* Contenido */}
+                            <div>
+                                <p className="text-[11px] font-black text-[#0a1e3f] uppercase leading-tight line-clamp-2">
+                                    {s?.name || t?.company || 'CLIENTE'}
+                                </p>
+                                <p className="text-[10px] font-bold text-slate-500 uppercase mt-1 flex items-center gap-1">
+                                    <MapPin size={10}/> {t?.location || 'Sitio'}
+                                </p>
+                                <p className="text-[10px] text-slate-400 mt-2 line-clamp-2 italic border-t border-slate-50 pt-2">
+                                    "{t?.description || c.details}"
+                                </p>
+                            </div>
+
+                            {/* Botón Acción (Solo Líder y No Realizado) */}
+                            {isLeader && t?.id && !isDone && (
                               <button
                                 onClick={() => openFinish(t)}
-                                className="mt-3 w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest inline-flex items-center justify-center gap-2"
+                                className="w-full py-2.5 rounded-xl bg-[#0a1e3f] hover:bg-blue-900 text-white text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-900/10 active:scale-95"
                               >
-                                <CheckCircle2 size={16} /> Marcar ejecutado
+                                <CheckCircle2 size={14} className="text-[#00C897]" /> Finalizar
                               </button>
                             )}
                           </div>
@@ -365,41 +350,43 @@ export default function OperativeView({ currentUser }: { currentUser: any }) {
                 </div>
               )
             })}
-          </div>
         </div>
       </div>
 
-      {/* Modal finalizar */}
+      {/* Modal Finalizar */}
       {finishOpen && finishTicket && (
-        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl overflow-hidden">
-            <div className="bg-[#0a1e3f] text-white p-6 flex items-center justify-between">
+        <div className="fixed inset-0 z-[200] bg-[#0a1e3f]/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="bg-slate-50 border-b border-slate-100 p-8 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#00C897]">Finalizar servicio</p>
-                <p className="font-black uppercase">{finishTicket.codigo_servicio || finishTicket.id}</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#00C897]">Finalizar Servicio</p>
+                <h3 className="text-xl font-black text-[#0a1e3f] uppercase">{finishTicket.codigo_servicio}</h3>
               </div>
-              <button onClick={() => setFinishOpen(false)} className="text-white/70 hover:text-white">
-                <X />
+              <button onClick={() => setFinishOpen(false)} className="p-2 bg-white rounded-full text-slate-400 hover:text-red-500 shadow-sm border border-slate-100 transition-colors">
+                <X size={20} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 inline-flex items-center gap-2">
-                <MessageSquareText size={14} /> Comentario del líder (opcional)
-              </label>
-              <textarea
-                value={finishComment}
-                onChange={(e) => setFinishComment(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-200 min-h-[120px]"
-                placeholder="Ej: Se realizó servicio, se cambió pieza X, recomendaciones..."
-              />
+            <div className="p-8 space-y-6">
+              <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 mb-2">
+                    <MessageSquareText size={14} /> Comentarios del Líder
+                  </label>
+                  <textarea
+                    value={finishComment}
+                    onChange={(e) => setFinishComment(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-xs font-bold text-[#0a1e3f] outline-none focus:border-[#00C897] min-h-[150px] resize-none uppercase"
+                    placeholder="DESCRIBE BREVEMENTE EL TRABAJO REALIZADO..."
+                  />
+              </div>
 
               <button
                 disabled={savingFinish}
                 onClick={confirmFinish}
-                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest disabled:opacity-60"
+                className="w-full bg-[#0a1e3f] hover:bg-blue-900 text-white font-black py-4 rounded-2xl uppercase tracking-widest disabled:opacity-60 flex items-center justify-center gap-2 shadow-xl shadow-blue-900/20 transition-all"
               >
-                {savingFinish ? 'Guardando...' : 'Confirmar finalización'}
+                {savingFinish ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle2 size={18}/>}
+                {savingFinish ? 'Guardando...' : 'Confirmar Trabajo Realizado'}
               </button>
             </div>
           </div>

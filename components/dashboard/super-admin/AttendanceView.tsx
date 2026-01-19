@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase-browser';
+import { supabase } from '@/lib/supabase';
 import { 
   Loader2, 
   MapPin, 
