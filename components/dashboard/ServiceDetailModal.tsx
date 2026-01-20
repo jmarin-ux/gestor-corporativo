@@ -48,8 +48,19 @@ export default function ServiceDetailModal({
   const [findings, setFindings] = useState(ticket?.technical_result || ''); 
   const [actionsDone, setActionsDone] = useState(ticket?.service_done_comment || ''); 
 
+  // --- 🟢 CORRECCIÓN VISUALIZACIÓN CLIENTE ---
+  const isRegisteredClient = !!ticket.client_id;
+  const displayCompany = isRegisteredClient 
+      ? (ticket.clients?.organization || ticket.clients?.full_name || 'SIN NOMBRE') 
+      : (ticket.company || 'CLIENTE PARTICULAR');
+
+  const displayContact = ticket.contact_name || ticket.full_name || (isRegisteredClient ? 'CONTACTO REGISTRADO' : 'SIN CONTACTO');
+  
+  // La ubicación ahora prioriza el campo 'location' directo del ticket, que es donde guardamos la dirección manual o la del cliente.
+  const displayLocation = ticket.location || ticket.address || (isRegisteredClient ? 'DIRECCIÓN REGISTRADA' : 'UBICACIÓN NO ESPECIFICADA');
+
+
   // --- FILTROS DE PERSONAL ---
-  // (Esto se mantiene igual porque depende de los datos de staff, no de permisos)
   const coordinatorsList = staff.filter(u => {
       const r = (u.role || '').toLowerCase();
       return ['coordinador', 'admin', 'superadmin', 'gerente'].includes(r);
@@ -77,7 +88,6 @@ export default function ServiceDetailModal({
   const canEditReport = hasReportPermission && !isStatusLocked;
 
   // --- LISTA DE ESTATUS DISPONIBLES ---
-  // Simplificamos esto usando lógica básica, ya que los roles complejos ahora se manejan con RBAC
   const availableStatuses = useMemo(() => {
       const options = [
           { value: 'pendiente', label: 'Pendiente' },
@@ -205,9 +215,10 @@ export default function ServiceDetailModal({
                     {ticket.codigo_servicio || 'SIN FOLIO'}
                 </span>
                 <span className="text-white/50 text-xs font-bold uppercase">{ticket.service_type}</span>
+                {!isRegisteredClient && <span className="bg-amber-500 text-white px-2 py-0.5 rounded text-[9px] font-bold uppercase">Particular</span>}
             </div>
             <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight text-white">
-                {ticket.company || 'CLIENTE PARTICULAR'}
+                {displayCompany}
             </h2>
           </div>
           <button onClick={onClose} className="bg-white/10 hover:bg-white/20 p-3 rounded-2xl transition-all text-white">
@@ -229,25 +240,40 @@ export default function ServiceDetailModal({
                 {/* INFO (Izquierda) */}
                 <div className="lg:col-span-7 space-y-6">
                     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 space-y-6">
+                        
+                        {/* CLIENTE (CORREGIDO) */}
                         <div className="flex items-start gap-4">
-                            <div className="bg-blue-50 p-3 rounded-2xl text-blue-600"><Building2 size={24}/></div>
+                            <div className={`p-3 rounded-2xl ${isRegisteredClient ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
+                                <Building2 size={24}/>
+                            </div>
                             <div>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cliente</p>
-                                <p className="text-base font-black text-slate-800 uppercase">{ticket.contact_name || ticket.full_name || 'Sin contacto'}</p>
-                                <p className="text-xs font-bold text-slate-500 lowercase">{ticket.client_email}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    {isRegisteredClient ? 'Cliente Registrado' : 'Cliente Particular'}
+                                </p>
+                                <p className="text-base font-black text-slate-800 uppercase">{displayCompany}</p>
+                                {displayContact && (
+                                    <p className="text-xs font-bold text-slate-500 flex items-center gap-1 mt-1">
+                                        <User size={10}/> {displayContact}
+                                    </p>
+                                )}
+                                {ticket.client_email && <p className="text-xs text-slate-400 lowercase">{ticket.client_email}</p>}
                             </div>
                         </div>
+
+                        {/* UBICACIÓN (CORREGIDO) */}
                         <div className="flex items-start gap-4 border-t border-slate-50 pt-4">
                             <div className="bg-amber-50 p-3 rounded-2xl text-amber-600"><MapPin size={24}/></div>
                             <div>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ubicación</p>
-                                <p className="text-sm font-bold text-slate-700 uppercase leading-snug">{ticket.location || ticket.address || 'Sin dirección registrada'}</p>
+                                <p className="text-sm font-bold text-slate-700 uppercase leading-snug">{displayLocation}</p>
                             </div>
                         </div>
+
+                        {/* DETALLE */}
                         <div className="flex items-start gap-4 border-t border-slate-50 pt-4">
                             <div className="bg-emerald-50 p-3 rounded-2xl text-emerald-600"><MessageSquare size={24}/></div>
                             <div>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detalle</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detalle del Servicio</p>
                                 <p className="text-sm font-medium text-slate-600 mt-1">{ticket.description || 'Sin descripción.'}</p>
                             </div>
                         </div>

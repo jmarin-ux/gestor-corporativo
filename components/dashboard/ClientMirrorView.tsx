@@ -142,7 +142,7 @@ function NewServiceModal({ isOpen, onClose, defaultClient }: any) {
             asset_id: selectedAssetId || null,
             client_id: defaultClient.id, // Cliente Fijo
             company: defaultClient.organization, // Nombre Fijo
-            service_type: 'Autogestión',
+            service_type: 'Programación Semanal',
             status: 'pendiente',
             // Generamos código temporal o dejamos que el backend lo haga
             codigo_servicio: `AU-${Date.now().toString().slice(-6)}` 
@@ -169,7 +169,7 @@ function NewServiceModal({ isOpen, onClose, defaultClient }: any) {
                 <div className="px-8 py-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                     <div>
                         <h2 className="text-xl font-black text-[#0a1e3f] uppercase tracking-tight flex items-center gap-2">
-                            <Box className="text-emerald-500"/> Nueva Autogestión
+                            <Box className="text-emerald-500"/> Programación Semanal
                         </h2>
                         <p className="text-slate-400 text-[10px] font-bold uppercase mt-1">
                             Cliente: <span className="text-blue-600">{defaultClient.organization}</span>

@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react';
 import { 
   X, Save, Search, Building2, Box, User, FileText, Hash, Loader2, CheckCircle2, 
-  Calendar, Users, UserPlus, Briefcase, Zap, Flag 
+  Calendar, Users, UserPlus, Briefcase, Zap, Flag, PlusCircle, MapPin 
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
-import { useRBAC } from '@/hooks/useRBAC'; // <--- IMPORTAMOS EL HOOK
+import { useRBAC } from '@/hooks/useRBAC';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -21,7 +21,6 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
   const [initialLoading, setInitialLoading] = useState(true);
   const [searchingAssets, setSearchingAssets] = useState(false);
   
-  // --- HOOK DE PERMISOS ---
   const { can } = useRBAC(currentUser?.role);
 
   const [clients, setClients] = useState<any[]>([]);
@@ -33,10 +32,16 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
 
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing');
   
+  // MODO DE ACTIVO (Buscar o Crear)
+  const [assetMode, setAssetMode] = useState<'search' | 'create'>('search');
+
   const [formData, setFormData] = useState({
     clientId: '', 
+    // Campos para cliente nuevo
     manualClientName: '', 
     manualContact: '',    
+    manualLocation: '', // 🟢 NUEVO CAMPO: Para evitar que la ubicación sea el nombre de la empresa
+
     description: '',
     projectReference: '',
     priority: 'Normal',
@@ -44,23 +49,28 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
     scheduleDate: '',
     leaderId: '',
     auxiliarId: '',
-    serviceType: 'Autogestión' 
+    serviceType: 'Programación Semanal',
+    
+    // CAMPOS PARA NUEVO ACTIVO
+    newAssetName: '',
+    newAssetSerial: '',
+    newAssetLocation: ''
   });
 
-  // Debounce for asset search
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(assetSearch), 500);
     return () => clearTimeout(timer);
   }, [assetSearch]);
 
-  // Initial Load
   useEffect(() => {
     if (isOpen) {
       setClientMode('existing');
+      setAssetMode('search'); 
       setFormData({
         clientId: client?.id || '', 
         manualClientName: '',
         manualContact: '',
+        manualLocation: '', // Reset
         description: '',
         projectReference: '',
         priority: 'Normal',
@@ -68,7 +78,10 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
         scheduleDate: '',
         leaderId: '',
         auxiliarId: '',
-        serviceType: 'Autogestión'
+        serviceType: 'Programación Semanal',
+        newAssetName: '',
+        newAssetSerial: '',
+        newAssetLocation: ''
       });
       setAssetSearch('');
       setFoundAssets([]);
@@ -92,7 +105,6 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
     }
   };
 
-  // Asset Search Logic
   useEffect(() => {
     if (!debouncedSearch) {
         setFoundAssets([]);
@@ -121,99 +133,105 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
 
   const generateAutoCode = () => {
     const now = new Date();
-    // Padding para asegurar que el mes siempre tenga 2 dígitos (ej: 01 en lugar de 1)
     const month = (now.getMonth() + 1).toString().padStart(2, '0'); 
-    // Año a 2 dígitos (ej: 26)
     const year = now.getFullYear().toString().slice(-2); 
-    
-    // Generar 3 caracteres aleatorios
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const randomStr = Array(3)
       .fill(0)
       .map(() => chars.charAt(Math.floor(Math.random() * chars.length)))
       .join('');
-      
-    // Resultado: AU0126XYZ
     return `AU${month}${year}${randomStr}`;
   };
 
-  // --- SUBMISSION HANDLER ---
   const handleSubmit = async () => {
-    // 🔐 VALIDACIÓN DE PERMISO ANTES DE GUARDAR
     if (!can('tickets', 'create')) {
         return alert("No tienes permiso para crear tickets.");
     }
 
+    // Validaciones Básicas
     if (!formData.description) return alert("Falta descripción.");
     if (clientMode === 'existing' && !formData.clientId) return alert("Selecciona cliente.");
     if (clientMode === 'new' && !formData.manualClientName) return alert("Nombre de cliente obligatorio.");
 
+    // Validación Nuevo Activo
+    if (assetMode === 'create' && !formData.newAssetName) {
+        return alert("Nombre del nuevo activo es obligatorio.");
+    }
+
     setSubmitting(true);
     try {
+        let finalAssetId = formData.assetId;
+
+        // 1. CREACIÓN DE ACTIVO (Si aplica)
+        if (assetMode === 'create') {
+            const { data: newAsset, error: assetError } = await supabase.from('assets').insert({
+                nombre_activo: formData.newAssetName.toUpperCase().trim(),
+                serie: formData.newAssetSerial.toUpperCase().trim(),
+                ubicacion: formData.newAssetLocation.toUpperCase().trim(),
+                client_id: clientMode === 'existing' ? formData.clientId : null,
+                cliente_nombre: clientMode === 'new' ? formData.manualClientName.toUpperCase().trim() : null,
+                status: 'ACTIVO'
+            }).select().single();
+
+            if (assetError) throw assetError;
+            finalAssetId = newAsset.id; 
+        }
+
         const generatedCode = generateAutoCode();
         let finalClientId = formData.clientId;
 
-        // Determine Location Logic
+        // 🟢 2. CORRECCIÓN LÓGICA DE UBICACIÓN
         let finalLocation = 'SITIO DEL CLIENTE'; 
         
         if (clientMode === 'new') {
-            finalLocation = formData.manualClientName; 
+            // Si el usuario escribió una ubicación manual, úsala. Si no, usa un genérico.
+            // YA NO usamos el nombre de la empresa como ubicación.
+            finalLocation = formData.manualLocation 
+                ? formData.manualLocation.toUpperCase().trim() 
+                : 'SITIO DEL CLIENTE'; 
         } else {
+            // Cliente existente: Usar la del catálogo
             const clientObj = clients.find(c => c.id === finalClientId);
             if (clientObj) {
                 finalLocation = clientObj.organization || clientObj.full_name || 'OFICINAS';
             }
         }
 
-        // --- COORDINATOR AUTO-ASSIGNMENT LOGIC ---
-        // Usamos el rol para determinar si se auto-asigna, pero validamos que sea coordinador
+        // Asignación de Coordinador
         let coordinatorAssigned = null;
         if (currentUser?.role === 'coordinador' || currentUser?.role === 'admin' || currentUser?.role === 'superadmin') {
-             // Si es coordinador (o superior) creando el ticket, se asume que él lo coordina inicialmente
              coordinatorAssigned = currentUser.id;
         }
 
         const newTicket = {
-            description: formData.description,
-            // ❌ ELIMINADO EL CAMPO 'title'
+            description: formData.description.toUpperCase().trim(),
             codigo_servicio: generatedCode,
-            service_type: 'Autogestión',
+            service_type: 'Programación Semanal',
             status: formData.leaderId ? 'asignado' : 'pendiente',
-            
             priority: formData.priority,
-            
             location: finalLocation, 
-
-            quote_reference: formData.projectReference, 
-
-            client_id: clientMode === 'existing' ? finalClientId : null,
-            company: clientMode === 'new' ? formData.manualClientName : null,
-            contact_name: clientMode === 'new' ? formData.manualContact : null,
+            quote_reference: formData.projectReference.toUpperCase().trim(), 
             
-            asset_id: formData.assetId || null,
+            // Lógica de Cliente
+            client_id: clientMode === 'existing' ? finalClientId : null,
+            // 🟢 Guardamos explícitamente los datos manuales si es modo 'new'
+            company: clientMode === 'new' ? formData.manualClientName.toUpperCase().trim() : null,
+            contact_name: clientMode === 'new' ? formData.manualContact.toUpperCase().trim() : null,
+            
+            asset_id: finalAssetId || null,
             
             scheduled_date: formData.scheduleDate || null,
             technical_lead_id: formData.leaderId || null,
             auxiliary_id: formData.auxiliarId || null,
-            
             coordinator_id: coordinatorAssigned, 
             created_by: currentUser?.id, 
-            
             technical_level: 'autogestion'
         };
 
         const { error } = await supabase.from('tickets').insert([newTicket]);
         if (error) throw error;
 
-        // Optional: Update asset location if assigned to a client
-        if (clientMode === 'existing' && formData.assetId && finalClientId) {
-            // Validamos permiso para editar activos antes de hacerlo automáticamente
-            if (can('assets', 'edit')) {
-                await supabase.from('assets').update({ client_id: finalClientId }).eq('id', formData.assetId);
-            }
-        }
-
-        alert(`✅ Autogestión Generada: ${generatedCode}`);
+        alert(`✅ Programación Semanal Generada: ${generatedCode}`);
         if (onSuccess) onSuccess();
         onClose();
 
@@ -225,7 +243,6 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
     }
   };
 
-  // Staff Filters
   const leadersList = staffList.filter(u => ['lider', 'operativo', 'líder'].includes((u.role || '').toLowerCase().trim()));
   const auxiliariesList = staffList.filter(u => ['auxiliar', 'ayudante', 'operativo'].includes((u.role || '').toLowerCase().trim()));
 
@@ -241,7 +258,6 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
             <div className="flex items-center gap-2">
                 <FileText className="text-[#00C897]" /> 
                 <h2 className="text-xl font-black uppercase tracking-tight">Programación Semanal</h2>
-                <span className="bg-[#00C897] text-[#0a1e3f] text-[10px] px-2 py-0.5 rounded font-bold">V6.3 FINAL</span>
             </div>
             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1 pl-8">
                 Generación Rápida de Servicio
@@ -261,8 +277,7 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
                 <>
                     {/* 1. CLIENTE Y REFERENCIA */}
                     <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-6">
-                        
-                        {/* Selector de Modo */}
+                        {/* Selector de Modo Cliente */}
                         <div className="md:col-span-3 flex flex-col gap-2">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tipo de Cliente</label>
                             <div className="flex flex-col gap-2">
@@ -285,7 +300,7 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
                             </div>
                         </div>
 
-                        {/* Inputs Dinámicos */}
+                        {/* Inputs Cliente */}
                         <div className="md:col-span-5">
                             {clientMode === 'existing' ? (
                                 <div>
@@ -305,16 +320,26 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
                                 <div className="space-y-3">
                                     <input 
                                         className="w-full bg-white border-2 border-emerald-100 rounded-xl px-4 py-2 text-xs font-bold text-[#0a1e3f] outline-none uppercase placeholder:text-slate-300"
-                                        placeholder="NOMBRE EMPRESA"
+                                        placeholder="NOMBRE EMPRESA *"
                                         value={formData.manualClientName}
-                                        onChange={(e) => setFormData({...formData, manualClientName: e.target.value.toUpperCase()})}
+                                        onChange={(e) => setFormData({...formData, manualClientName: e.target.value})}
                                     />
                                     <input 
                                         className="w-full bg-white border-2 border-emerald-100 rounded-xl px-4 py-2 text-xs font-bold text-[#0a1e3f] outline-none uppercase placeholder:text-slate-300"
-                                        placeholder="CONTACTO"
+                                        placeholder="NOMBRE CONTACTO"
                                         value={formData.manualContact}
-                                        onChange={(e) => setFormData({...formData, manualContact: e.target.value.toUpperCase()})}
+                                        onChange={(e) => setFormData({...formData, manualContact: e.target.value})}
                                     />
+                                    {/* 🟢 NUEVO INPUT DE UBICACIÓN */}
+                                    <div className="relative">
+                                        <MapPin className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                                        <input 
+                                            className="w-full bg-white border-2 border-emerald-100 rounded-xl px-4 py-2 text-xs font-bold text-[#0a1e3f] outline-none uppercase placeholder:text-slate-300"
+                                            placeholder="UBICACIÓN / DIRECCIÓN"
+                                            value={formData.manualLocation}
+                                            onChange={(e) => setFormData({...formData, manualLocation: e.target.value})}
+                                        />
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -405,62 +430,117 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
 
                     <div className="h-px bg-slate-100 w-full" />
 
-                    {/* 3. BÚSQUEDA DE ACTIVOS */}
+                    {/* 3. ACTIVOS (BUSCAR O CREAR) */}
                     <div>
                         <div className="flex items-center justify-between mb-2">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                <Box size={14}/> Buscador de Activos (Escribe para buscar)
+                                <Box size={14}/> Activo / Equipo
                             </label>
-                            {searchingAssets && <span className="text-[9px] text-blue-500 font-bold animate-pulse">BUSCANDO...</span>}
-                        </div>
-                        
-                        <div className="relative mb-3">
-                            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
-                            <input 
-                                className="w-full bg-slate-100 rounded-full pl-12 pr-4 py-3 text-[10px] font-bold uppercase outline-none focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400"
-                                placeholder="ESCRIBE NOMBRE, SERIE O ID..."
-                                value={assetSearch}
-                                onChange={(e) => setAssetSearch(e.target.value)}
-                            />
-                        </div>
-
-                        {/* LISTA DE RESULTADOS */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden h-40 bg-white relative">
-                            <div className="overflow-y-auto h-full custom-scrollbar">
-                                {foundAssets.length === 0 ? (
-                                    <div className="h-full flex items-center justify-center text-[10px] text-slate-400 font-bold uppercase">
-                                        {assetSearch ? 'No se encontraron resultados' : 'Esperando búsqueda...'}
-                                    </div>
-                                ) : (
-                                    <table className="w-full text-left text-[10px]">
-                                        <thead className="bg-slate-50 text-slate-500 font-black uppercase sticky top-0">
-                                            <tr>
-                                                <th className="p-2">Sel</th>
-                                                <th className="p-2">Equipo</th>
-                                                <th className="p-2">Serie</th>
-                                                <th className="p-2 text-right">Ubicación</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {foundAssets.map(asset => (
-                                                <tr 
-                                                    key={asset.id} 
-                                                    onClick={() => setFormData({...formData, assetId: asset.id === formData.assetId ? '' : asset.id})}
-                                                    className={`cursor-pointer hover:bg-slate-50 ${formData.assetId === asset.id ? 'bg-emerald-50' : ''}`}
-                                                >
-                                                    <td className="p-2 text-center">
-                                                        <div className={`w-3 h-3 rounded-full border mx-auto ${formData.assetId === asset.id ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}></div>
-                                                    </td>
-                                                    <td className="p-2 font-bold text-[#0a1e3f] uppercase">{asset.nombre_activo}</td>
-                                                    <td className="p-2 text-slate-500 uppercase">{asset.serial_number || asset.serie}</td>
-                                                    <td className="p-2 text-right text-slate-400 uppercase">{asset.clients ? asset.clients.organization : 'SIN ASIGNAR'}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )}
+                            
+                            <div className="flex bg-slate-100 rounded-lg p-0.5">
+                                <button 
+                                    onClick={() => setAssetMode('search')}
+                                    className={`px-3 py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
+                                        assetMode === 'search' ? 'bg-white shadow-sm text-[#0a1e3f]' : 'text-slate-400'
+                                    }`}
+                                >
+                                    Buscar
+                                </button>
+                                <button 
+                                    onClick={() => setAssetMode('create')}
+                                    className={`px-3 py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
+                                        assetMode === 'create' ? 'bg-white shadow-sm text-emerald-600' : 'text-slate-400'
+                                    }`}
+                                >
+                                    + Nuevo
+                                </button>
                             </div>
                         </div>
+                        
+                        {assetMode === 'search' ? (
+                            <>
+                                <div className="relative mb-3">
+                                    <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                    <input 
+                                        className="w-full bg-slate-100 rounded-full pl-12 pr-4 py-3 text-[10px] font-bold uppercase outline-none focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400"
+                                        placeholder="ESCRIBE NOMBRE, SERIE O ID..."
+                                        value={assetSearch}
+                                        onChange={(e) => setAssetSearch(e.target.value)}
+                                    />
+                                    {searchingAssets && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[9px] text-blue-500 font-bold animate-pulse">BUSCANDO...</span>}
+                                </div>
+
+                                <div className="border border-slate-200 rounded-2xl overflow-hidden h-40 bg-white relative">
+                                    <div className="overflow-y-auto h-full custom-scrollbar">
+                                        {foundAssets.length === 0 ? (
+                                            <div className="h-full flex items-center justify-center text-[10px] text-slate-400 font-bold uppercase">
+                                                {assetSearch ? 'No se encontraron resultados' : 'Esperando búsqueda...'}
+                                            </div>
+                                        ) : (
+                                            <table className="w-full text-left text-[10px]">
+                                                <thead className="bg-slate-50 text-slate-500 font-black uppercase sticky top-0">
+                                                    <tr>
+                                                        <th className="p-2">Sel</th>
+                                                        <th className="p-2">Equipo</th>
+                                                        <th className="p-2">Serie</th>
+                                                        <th className="p-2 text-right">Ubicación</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {foundAssets.map(asset => (
+                                                        <tr 
+                                                            key={asset.id} 
+                                                            onClick={() => setFormData({...formData, assetId: asset.id === formData.assetId ? '' : asset.id})}
+                                                            className={`cursor-pointer hover:bg-slate-50 ${formData.assetId === asset.id ? 'bg-emerald-50' : ''}`}
+                                                        >
+                                                            <td className="p-2 text-center">
+                                                                <div className={`w-3 h-3 rounded-full border mx-auto ${formData.assetId === asset.id ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}></div>
+                                                            </td>
+                                                            <td className="p-2 font-bold text-[#0a1e3f] uppercase">{asset.nombre_activo}</td>
+                                                            <td className="p-2 text-slate-500 uppercase">{asset.serial_number || asset.serie}</td>
+                                                            <td className="p-2 text-right text-slate-400 uppercase">{asset.clients ? asset.clients.organization : 'SIN ASIGNAR'}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 grid grid-cols-3 gap-4 animate-in slide-in-from-top-2">
+                                <div className="col-span-1">
+                                    <label className="text-[9px] font-black text-emerald-600 uppercase mb-1 block">Nombre Activo *</label>
+                                    <input 
+                                        className="w-full bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs font-bold text-[#0a1e3f] outline-none uppercase"
+                                        placeholder="EJ: AIRE ACONDICIONADO"
+                                        value={formData.newAssetName}
+                                        onChange={(e) => setFormData({...formData, newAssetName: e.target.value.toUpperCase()})}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="text-[9px] font-black text-emerald-600 uppercase mb-1 block">Serie (Opcional)</label>
+                                    <input 
+                                        className="w-full bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs font-bold text-[#0a1e3f] outline-none uppercase"
+                                        placeholder="S/N..."
+                                        value={formData.newAssetSerial}
+                                        onChange={(e) => setFormData({...formData, newAssetSerial: e.target.value.toUpperCase()})}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="text-[9px] font-black text-emerald-600 uppercase mb-1 block">Ubicación (Opcional)</label>
+                                    <input 
+                                        className="w-full bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs font-bold text-[#0a1e3f] outline-none uppercase"
+                                        placeholder="EJ: OFICINA PRINCIPAL"
+                                        value={formData.newAssetLocation}
+                                        onChange={(e) => setFormData({...formData, newAssetLocation: e.target.value.toUpperCase()})}
+                                    />
+                                </div>
+                                <div className="col-span-3 text-[9px] text-emerald-600 font-bold italic text-center">
+                                    * Este activo se registrará automáticamente en el inventario al guardar el ticket.
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </>
             )}

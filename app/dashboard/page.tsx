@@ -160,7 +160,7 @@ export default function DashboardPage() {
   const visibleTabs = useMemo(() => {
       // Pestañas BASE que TODOS ven (incluido Operativos)
       // Agregamos 'asistencia' aquí para que aparezca
-      const tabs: Tab[] = ['operaciones', 'planificador', 'asistencia'];
+      const tabs: Tab[] = ['operaciones', 'planificador', 'asistencia','activos'];
 
       // Pestañas EXTRA para ADMIN y SUPERADMIN
       if (['superadmin', 'admin'].includes(currentUserRole)) {
