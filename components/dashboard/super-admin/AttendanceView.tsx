@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser'; 
 import { 
   Loader2, 
   MapPin, 
@@ -16,6 +16,13 @@ import {
   LogOut,
   CheckCircle2
 } from 'lucide-react';
+
+// --- HELPER PARA NORMALIZAR ROLES ---
+const normalizeRole = (role: any) => {
+  return (role || '').toString().toLowerCase().trim();
+};
+
+const ADMIN_ROLES = ['admin', 'superadmin', 'coordinador', 'gerente'];
 
 export default function AttendanceView() {
   const [groupedLogs, setGroupedLogs] = useState<any[]>([]);
@@ -33,22 +40,19 @@ export default function AttendanceView() {
   // 1. INICIALIZAR USUARIO Y FECHAS
   useEffect(() => {
     const init = async () => {
-      // Usuario
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: profile } = await supabase.from('profiles').select('id, role, full_name').eq('id', user.id).single();
         setCurrentUser(profile);
       }
-      // Aplicar filtro HOY por defecto
       applyPreset('hoy');
     };
     init();
   }, []);
 
-  // 2. LÓGICA DE PRESETS (QUINCENA, SEMANA, ETC)
+  // 2. LÓGICA DE PRESETS
   const applyPreset = (preset: string) => {
       const now = new Date();
-      // Ajuste para trabajar con fechas locales limpias
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       
       let start = new Date(today);
@@ -56,41 +60,31 @@ export default function AttendanceView() {
 
       switch (preset) {
           case 'hoy':
-              // Start y End son hoy
               break;
-          
           case 'semana':
-              // Lunes a Domingo de la semana actual
-              const day = today.getDay() || 7; // Domingo es 7
+              const day = today.getDay() || 7; 
               if (day !== 1) start.setDate(today.getDate() - (day - 1));
               end.setDate(start.getDate() + 6);
               break;
-
           case 'quincena':
-              // Regla: Día 1-15 (1ra Q) o 16-Fin (2da Q)
               const currentDay = today.getDate();
               if (currentDay <= 15) {
                   start.setDate(1);
                   end.setDate(15);
               } else {
                   start.setDate(16);
-                  // Truco para último día del mes
                   end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
               }
               break;
-
           case 'mes':
               start.setDate(1);
               end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
               break;
-
           case 'custom':
-              // No cambiamos las fechas, el usuario elige
               setSelectedPreset('custom');
               return;
       }
 
-      // Convertimos a string YYYY-MM-DD local
       const toLocalISO = (d: Date) => {
           const offset = d.getTimezoneOffset() * 60000;
           return new Date(d.getTime() - offset).toISOString().split('T')[0];
@@ -107,12 +101,9 @@ export default function AttendanceView() {
     if (!currentUser || !startDate || !endDate) return;
     setLoading(true);
     
-    // Inicio: Día seleccionado a las 00:00:00 local
     const startObj = new Date(`${startDate}T00:00:00`); 
-    // Fin: Día seleccionado a las 23:59:59.999 local
     const endObj = new Date(`${endDate}T23:59:59.999`);
 
-    // Convertimos a UTC para Supabase
     const startIso = startObj.toISOString();
     const endIso = endObj.toISOString();
 
@@ -126,24 +117,24 @@ export default function AttendanceView() {
       .lte('created_at', endIso)
       .order('created_at', { ascending: true });
 
-    // 🔐 SEGURIDAD: Filtro por Rol
-    const role = (currentUser.role || '').toLowerCase();
-    if (!['admin', 'superadmin', 'coordinador', 'gerente'].includes(role)) {
+    // 🔐 SEGURIDAD: Filtro por Rol Normalizado
+    const role = normalizeRole(currentUser.role);
+    
+    if (!ADMIN_ROLES.includes(role)) {
        query = query.eq('user_id', currentUser.id);
     }
 
     const { data, error } = await query;
-    if (error) console.error("Error:", error);
+    if (error) console.error("Error fetching logs:", error);
 
     const rawLogs = data || [];
 
-    // 🧩 AGRUPACIÓN UNIFICADA (Entrada + Salida + Salida Automática)
+    // 🧩 AGRUPACIÓN
     const groups: Record<string, any> = {};
 
     rawLogs.forEach((log) => {
-        // Usamos la fecha LOCAL para agrupar visualmente
         const logDateObj = new Date(log.created_at);
-        const logDate = logDateObj.toLocaleDateString('en-CA'); // YYYY-MM-DD local
+        const logDate = logDateObj.toLocaleDateString('en-CA'); 
         const userId = log.user_id;
         const key = `${userId}_${logDate}`;
 
@@ -161,7 +152,6 @@ export default function AttendanceView() {
         if (log.check_type === 'ENTRADA') {
             if (!groups[key].entrada) groups[key].entrada = log;
         } 
-        // Aceptamos tanto la salida manual como la automática para cerrar la jornada
         else if (log.check_type === 'SALIDA' || log.check_type === 'SALIDA_AUTO') {
             groups[key].salida = log;
         }
@@ -179,14 +169,15 @@ export default function AttendanceView() {
     fetchAndGroupLogs();
   }, [fetchAndGroupLogs]);
 
-  // 🟢 ACCIÓN: CIERRE MANUAL (SOLO SUPERADMIN)
+  // 🟢 ACCIÓN: CIERRE MANUAL
   const handleManualClose = async (userId: string, date: string, name: string) => {
-    const isSuperAdmin = currentUser?.role?.toLowerCase() === 'superadmin';
+    const role = normalizeRole(currentUser?.role);
+    const isSuperAdmin = role === 'superadmin';
+    
     if (!isSuperAdmin) return;
 
     if (!confirm(`¿Deseas cerrar manualmente la jornada de ${name} para el día ${date}?`)) return;
 
-    // Se fuerza el registro a las 18:00 (UTC-6 aproximado para el string ISO)
     const forcedCheckout = `${date}T18:00:00.000Z`;
 
     const { error } = await supabase.from('attendance_logs').insert({
@@ -201,16 +192,16 @@ export default function AttendanceView() {
     if (error) {
         alert("Error al cerrar: " + error.message);
     } else {
-        fetchAndGroupLogs(); // Recargar tabla
+        fetchAndGroupLogs(); 
     }
   };
 
-  // Sub-componente de Celda de Tiempo
+  // Sub-componente TimeCell
   const TimeCell = ({ log, type, userId, date, name }: { log: any, type: 'ENTRADA' | 'SALIDA', userId?: string, date?: string, name?: string }) => {
-      const isSuperAdmin = currentUser?.role?.toLowerCase() === 'superadmin';
+      const role = normalizeRole(currentUser?.role);
+      const isSuperAdmin = role === 'superadmin';
 
       if (!log) {
-          // Si falta la SALIDA y el usuario es SUPERADMIN, mostrar botón de cierre
           if (type === 'SALIDA' && isSuperAdmin) {
             return (
                 <button 
@@ -231,16 +222,15 @@ export default function AttendanceView() {
           );
       }
 
-      // Visualización especial para SALIDA AUTOMÁTICA (ROJO)
       if (log.check_type === 'SALIDA_AUTO') {
         return (
             <div className="flex items-center justify-between p-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 min-w-[160px]">
                 <div className="flex items-center gap-2">
-                     <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
-                     <div className="flex flex-col">
-                         <span className="text-[9px] font-black uppercase leading-none">Sin Checada</span>
-                         <span className="text-xs font-black mt-1">06:00 p.m.</span>
-                     </div>
+                      <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
+                      <div className="flex flex-col">
+                          <span className="text-[9px] font-black uppercase leading-none">Sin Checada</span>
+                          <span className="text-xs font-black mt-1">06:00 p.m.</span>
+                      </div>
                 </div>
             </div>
         );
@@ -253,10 +243,10 @@ export default function AttendanceView() {
       return (
           <div className={`flex items-center justify-between p-2 rounded-xl border border-slate-100/50 ${bgClass} min-w-[160px]`}>
               <div className="flex items-center gap-2">
-                   <div className={`w-2 h-2 rounded-full ${badgeClass}`}></div>
-                   <span className="text-xs font-black">
-                       {new Date(log.created_at).toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit', hour12: true})}
-                   </span>
+                    <div className={`w-2 h-2 rounded-full ${badgeClass}`}></div>
+                    <span className="text-xs font-black">
+                        {new Date(log.created_at).toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit', hour12: true})}
+                    </span>
               </div>
               
               <div className="flex gap-1">
@@ -268,7 +258,7 @@ export default function AttendanceView() {
                       <Eye size={12}/>
                   </button>
                   <a 
-                    href={`https://www.google.com/maps/search/?api=1&query=${log.latitude},${log.longitude}`} 
+                    href={`https://www.google.com/maps?q=${log.latitude},${log.longitude}`} 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="p-1.5 bg-white rounded-lg hover:text-red-600 transition-colors shadow-sm"
@@ -283,8 +273,8 @@ export default function AttendanceView() {
 
   if (!currentUser) return null;
 
-  // Lógica para el título dinámico
-  const canViewAll = ['admin', 'superadmin', 'coordinador', 'gerente'].includes((currentUser.role || '').toLowerCase());
+  const role = normalizeRole(currentUser.role);
+  const canViewAll = ADMIN_ROLES.includes(role);
 
   return (
     <div className="space-y-6 animate-in fade-in pb-10">
@@ -297,6 +287,7 @@ export default function AttendanceView() {
                 <h2 className="text-xl font-black text-[#0a1e3f] uppercase flex items-center gap-2">
                     <Calendar className="text-emerald-500" /> Bitácora de Asistencia
                 </h2>
+                {/* 🔴 AQUÍ ESTABA EL ERROR: AHORA CIERRA CORRECTAMENTE CON </p> */}
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
                     {canViewAll ? 'Vista Global de Personal' : 'Mis Registros Personales'}
                 </p>
@@ -304,8 +295,6 @@ export default function AttendanceView() {
 
             {/* ZONA DE FILTROS */}
             <div className="flex flex-col md:flex-row gap-2 w-full xl:w-auto">
-                
-                {/* 1. Botón Dropdown de Presets */}
                 <div className="relative">
                     <button 
                         onClick={() => setShowFilterMenu(!showFilterMenu)}
@@ -318,7 +307,6 @@ export default function AttendanceView() {
                         <ChevronDown size={14} className={`text-slate-400 transition-transform ${showFilterMenu ? 'rotate-180' : ''}`}/>
                     </button>
 
-                    {/* Menú Desplegable */}
                     {showFilterMenu && (
                         <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-in fade-in zoom-in-95">
                             {[
@@ -340,7 +328,6 @@ export default function AttendanceView() {
                     )}
                 </div>
 
-                {/* 2. Selectores de Fecha */}
                 <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex-1 xl:flex-none">
                     <input 
                         type="date" 
@@ -362,7 +349,6 @@ export default function AttendanceView() {
                         <Search size={14}/>
                     </button>
                 </div>
-
             </div>
         </div>
 
@@ -393,8 +379,6 @@ export default function AttendanceView() {
                         <tbody className="divide-y divide-slate-50">
                             {groupedLogs.map((row) => (
                                 <tr key={row.id} className="hover:bg-slate-50/50 transition-colors group">
-                                    
-                                    {/* FECHA */}
                                     <td className="p-5">
                                         <div className="flex flex-col">
                                             <span className="text-xs font-black text-[#0a1e3f] uppercase group-hover:text-emerald-600 transition-colors">
@@ -406,7 +390,6 @@ export default function AttendanceView() {
                                         </div>
                                     </td>
 
-                                    {/* USUARIO */}
                                     <td className="p-5">
                                         <div className="flex items-center gap-3">
                                             <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs">
@@ -423,12 +406,10 @@ export default function AttendanceView() {
                                         </div>
                                     </td>
 
-                                    {/* ENTRADA */}
                                     <td className="p-5">
                                         <TimeCell log={row.entrada} type="ENTRADA" />
                                     </td>
 
-                                    {/* SALIDA */}
                                     <td className="p-5">
                                         <TimeCell 
                                           log={row.salida} 
@@ -439,7 +420,6 @@ export default function AttendanceView() {
                                         />
                                     </td>
 
-                                    {/* ESTATUS */}
                                     <td className="p-5 text-center">
                                         {row.entrada && row.salida ? (
                                             <span className="inline-flex px-3 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-[9px] font-black uppercase tracking-wider items-center gap-1">
