@@ -2,22 +2,28 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Calendar, Clock, MapPin, Eye, ArrowDown } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { Loader2, Calendar, Clock, MapPin, Eye, Fingerprint } from 'lucide-react'
+import { supabase } from '@/lib/supabase-browser'
 
-// Componentes existentes
+// Componentes
 import Header from '@/components/ui/Header' 
 import PlannerView from '@/components/dashboard/PlannerView' 
+
+// 🔴 CORRECCIÓN AQUÍ: Agregamos "/dashboard" a la ruta
+import AttendanceModal from '@/components/dashboard/AttendanceModal' 
 
 export default function DashboardStaffPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   
-  // Estados para la vista de asistencia
+  // Estados para la vista
   const [activeTab, setActiveTab] = useState<'planner' | 'history'>('planner')
   const [myLogs, setMyLogs] = useState<any[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
+
+  // Estado para el modal
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   // 1. CARGA DE SESIÓN
   useEffect(() => {
@@ -41,7 +47,6 @@ export default function DashboardStaffPage() {
          return
       }
 
-      // Validación de Rol (Permitimos que entren operativos y coordinadores si lo deseas en esta vista)
       const userRole = (profile.role || '').toLowerCase().trim()
       if (!['operativo', 'staff', 'technician', 'coordinador', 'admin', 'superadmin'].includes(userRole)) {
          await supabase.auth.signOut()
@@ -56,21 +61,24 @@ export default function DashboardStaffPage() {
     getSession()
   }, [])
 
-  // 2. CARGAR MIS REGISTROS (SOLO LOS DEL USUARIO ACTUAL)
+  // Función reutilizable para refrescar logs
+  const fetchMyAttendance = async () => {
+    if (!user) return
+    setLoadingLogs(true)
+    const { data } = await supabase
+        .from('attendance_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+    setMyLogs(data || [])
+    setLoadingLogs(false)
+  }
+
+  // 2. CARGAR MIS REGISTROS AL CAMBIAR TAB
   useEffect(() => {
     if (activeTab === 'history' && user) {
-        const fetchMyAttendance = async () => {
-            setLoadingLogs(true)
-            const { data } = await supabase
-                .from('attendance_logs')
-                .select('*')
-                .eq('user_id', user.id) // 🔒 FILTRO DE SEGURIDAD: Solo mis registros
-                .order('created_at', { ascending: false }) // Del más reciente al más antiguo
-                .limit(50) // Traemos los últimos 50 para no saturar
-
-            setMyLogs(data || [])
-            setLoadingLogs(false)
-        }
         fetchMyAttendance()
     }
   }, [activeTab, user])
@@ -80,6 +88,15 @@ export default function DashboardStaffPage() {
         await supabase.auth.signOut()
         localStorage.clear()
         window.location.href = '/login'
+    }
+  }
+
+  // Callback cuando se registra asistencia con éxito
+  const handleAttendanceSuccess = () => {
+    if (activeTab === 'history') {
+        fetchMyAttendance()
+    } else {
+        setActiveTab('history')
     }
   }
 
@@ -102,8 +119,9 @@ export default function DashboardStaffPage() {
 
       <div className="pt-24 px-4 pb-8 max-w-7xl mx-auto">
         
-        {/* BOTONES DE NAVEGACIÓN (TABS) */}
-        <div className="flex justify-center md:justify-start mb-6">
+        {/* ENCABEZADO Y BOTÓN DE ASISTENCIA */}
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+             {/* TABS */}
             <div className="bg-white p-1.5 rounded-2xl shadow-sm inline-flex gap-1 border border-slate-100">
                 <button 
                     onClick={() => setActiveTab('planner')}
@@ -124,29 +142,35 @@ export default function DashboardStaffPage() {
                         : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
                     }`}
                 >
-                    <Clock size={14} strokeWidth={2.5}/> Historial Asistencia
+                    <Clock size={14} strokeWidth={2.5}/> Historial
                 </button>
             </div>
+
+            {/* BOTÓN PARA ABRIR MODAL */}
+            <button 
+                onClick={() => setIsModalOpen(true)}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-widest transition-transform active:scale-95"
+            >
+                <Fingerprint size={18} /> Registrar Asistencia
+            </button>
         </div>
 
         {/* CONTENEDOR PRINCIPAL */}
         <div className="bg-white rounded-[2rem] shadow-sm min-h-[80vh] overflow-hidden border border-slate-100/50">
             
-            {/* VISTA 1: PLANIFICADOR (Tareas) */}
             {activeTab === 'planner' && (
                 <div className="p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <PlannerView currentUser={user} onBack={handleLogout} />
                 </div>
             )}
 
-            {/* VISTA 2: TABLA DE HISTORIAL (Espejo simple) */}
             {activeTab === 'history' && (
                 <div className="p-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-lg font-black text-[#0a1e3f] uppercase">Mis Registros Recientes</h2>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-50 px-3 py-1 rounded-full">
-                            Mostrando últimos 50
-                        </span>
+                        <button onClick={fetchMyAttendance} className="text-[10px] font-bold text-slate-400 uppercase bg-slate-50 px-3 py-1 rounded-full hover:bg-slate-100">
+                            Actualizar
+                        </button>
                     </div>
 
                     {loadingLogs ? (
@@ -219,9 +243,17 @@ export default function DashboardStaffPage() {
                     )}
                 </div>
             )}
-
         </div>
       </div>
+
+      {user && (
+        <AttendanceModal 
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            currentUser={user}
+            onSuccess={handleAttendanceSuccess}
+        />
+      )}
     </main>
   )
 }

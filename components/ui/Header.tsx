@@ -1,10 +1,10 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { LogOut, ChevronDown, Camera } from 'lucide-react' // ✅ Camera importada
+import { LogOut, ChevronDown, Camera } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import AttendanceModal from '@/components/dashboard/AttendanceModal' // ✅ Importar Modal
+import AttendanceModal from '@/components/dashboard/AttendanceModal'
 
 interface UserSession {
   id: string
@@ -35,11 +35,10 @@ export default function Header({
   // ✅ Estado para controlar el modal de asistencia
   const [showAttendance, setShowAttendance] = useState(false)
 
-  // 🔐 BOOT DE IDENTIDAD — Recuperación de sesión local
+  // 🔐 BOOT DE IDENTIDAD
   useEffect(() => {
     if (propUser) return
 
-    // 1️⃣ Si hay operativo activo (staff_user), tiene prioridad
     const staffRaw = localStorage.getItem('staff_user')
     if (staffRaw) {
       try {
@@ -50,9 +49,7 @@ export default function Header({
       }
     }
 
-    // 2️⃣ Si no hay staff, buscamos otros tipos de sesión
     const keys = ['kiosk_device_user', 'kiosco_user', 'client_user', 'kiosk_user']
-
     for (const k of keys) {
       const stored = localStorage.getItem(k)
       if (stored) {
@@ -66,7 +63,6 @@ export default function Header({
     }
   }, [propUser])
 
-  // --- LÓGICA DE LOGOUT ROBUSTA ---
   const handleLogout = async () => {
     if (!window.confirm("¿Estás seguro de que deseas cerrar sesión?")) return
 
@@ -83,8 +79,6 @@ export default function Header({
       window.location.href = logoutRedirectTo
     }
   }
-
-  // --- RENDERIZADO ---
 
   const activeUser = propUser || localUser
 
@@ -145,7 +139,7 @@ export default function Header({
 
         <div className="flex items-center gap-6">
             
-            {/* 👇 BOTÓN DE ASISTENCIA (NUEVO) */}
+            {/* 👇 BOTÓN DE ASISTENCIA */}
             {!isClient && (
                 <button 
                     onClick={() => setShowAttendance(true)}
@@ -185,7 +179,7 @@ export default function Header({
                 <p className="text-xs font-bold leading-none text-slate-700 truncate max-w-[150px]">
                 {activeUser.full_name}
                 </p>
-                {/* Botón móvil de asistencia (solo visible en pantallas pequeñas) */}
+                {/* Botón móvil de asistencia */}
                 <button 
                     onClick={() => setShowAttendance(true)}
                     className="sm:hidden mt-1 text-[9px] font-black uppercase tracking-widest text-[#00C897] flex items-center justify-end gap-1"
@@ -217,7 +211,7 @@ export default function Header({
                 isOpen={true}
                 onClose={() => setShowAttendance(false)}
                 currentUser={activeUser}
-                type="ENTRADA" // Puedes personalizar esto o dejar que el modal decida
+                // 🔴 HE ELIMINADO LA PROPIEDAD "type" PARA QUE SEA AUTOMÁTICO
             />
         )}
     </>

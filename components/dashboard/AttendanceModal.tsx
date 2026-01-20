@@ -1,14 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { X, Camera, MapPin, Loader2, CheckCircle2, RefreshCw, AlertTriangle, ShieldAlert, Clock } from 'lucide-react';
-import { supabase } from '@/lib/supabase-browser'; // Asegúrate de la ruta correcta
+import { X, Camera, MapPin, Loader2, CheckCircle2, RefreshCw, ShieldAlert, Clock } from 'lucide-react';
+import { supabase } from '@/lib/supabase-browser'; 
 
-/* ---------------------------------------------------
-   1. REGLA DE GEOCERCA (DISTANCIA)
---------------------------------------------------- */
-const OFFICE_LOCATION = { lat: 19.4326, lng: -99.1332 }; 
-const MAX_DISTANCE_METERS = 500; 
+// --- 1. CONFIGURACIÓN DE GEOCERCA ---
+const OFFICE_LOCATION = { lat: 19.4326, lng: -99.1332 }; // CDMX (Ejemplo)
+// const MAX_DISTANCE_METERS = 500; 
 
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371e3; 
@@ -21,9 +19,7 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c; 
 };
 
-/* ---------------------------------------------------
-   2. REGLA DE COMPRESIÓN DE IMAGEN
---------------------------------------------------- */
+// --- 2. COMPRESIÓN DE IMAGEN ---
 const compressImage = async (file: File, quality = 0.6, maxWidth = 1000): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -53,12 +49,13 @@ const compressImage = async (file: File, quality = 0.6, maxWidth = 1000): Promis
   });
 };
 
+// --- INTERFAZ ---
 interface AttendanceModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: any;
-  type?: 'ENTRADA' | 'SALIDA'; 
   onSuccess?: () => void;
+  type?: string; // 🟢 LO DEJAMOS OPCIONAL PARA EVITAR ERRORES DE TS
 }
 
 export default function AttendanceModal({ isOpen, onClose, currentUser, onSuccess }: AttendanceModalProps) {
@@ -75,36 +72,39 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
   const [isOutOfRange, setIsOutOfRange] = useState(false); 
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   
-  // Estado determinado automáticamente
+  // Estado automático
   const [determinedType, setDeterminedType] = useState<'ENTRADA' | 'SALIDA' | null>(null);
-  
-  // 🔴 NUEVO: Detectar si fue cierre automático
   const [isAutoClosed, setIsAutoClosed] = useState(false);
 
-  // 1. VERIFICAR ESTADO DEL DÍA AL ABRIR
+  // AL ABRIR EL MODAL
   useEffect(() => {
     if (isOpen) {
         checkDailyStatus();
+    } else {
+        stopCamera(); 
     }
-    return stopCamera;
+    return () => stopCamera();
   }, [isOpen]);
 
   const checkDailyStatus = async () => {
+    if (!currentUser?.id) return;
+    
     setStep('checking');
-    setIsAutoClosed(false); // Reset
+    setIsAutoClosed(false);
+    setCapturedImage(null); 
 
     const today = new Date().toISOString().split('T')[0];
     const startOfDay = `${today}T00:00:00.000Z`;
     const endOfDay = `${today}T23:59:59.999Z`;
 
-    // 🔍 CAMBIO: Traemos los datos (check_type) en lugar de solo contar
+    // Consultar registros de HOY
     const { data: logs, error } = await supabase
         .from('attendance_logs')
         .select('check_type, created_at')
         .eq('user_id', currentUser.id)
         .gte('created_at', startOfDay)
         .lte('created_at', endOfDay)
-        .order('created_at', { ascending: true }); // Importante el orden
+        .order('created_at', { ascending: true });
 
     if (error) {
         alert("Error verificando estatus: " + error.message);
@@ -114,22 +114,19 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
 
     const recordsCount = logs?.length || 0;
 
-    // --- LÓGICA DE FLUJO ---
+    // LÓGICA AUTOMÁTICA
     if (recordsCount === 0) {
-        // No hay nada -> Toca ENTRADA
         setDeterminedType('ENTRADA');
         startCamera();
         getLocation();
         setStep('camera');
     } else if (recordsCount === 1) {
-        // Hay 1 registro (Entrada) -> Toca SALIDA
         setDeterminedType('SALIDA');
         startCamera();
         getLocation();
         setStep('camera');
     } else {
-        // Ya tiene 2 o más registros (Jornada cerrada)
-        // 🔴 Verificamos si el último registro fue automático
+        // Ya tiene entrada y salida (o más)
         const lastLog = logs![logs!.length - 1];
         if (lastLog.check_type === 'SALIDA_AUTO') {
             setIsAutoClosed(true);
@@ -149,8 +146,10 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
   };
 
   const stopCamera = () => {
-    stream?.getTracks().forEach((t) => t.stop());
-    setStream(null);
+    if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        setStream(null);
+    }
   };
 
   const getLocation = () => {
@@ -161,8 +160,7 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
          setLocation(current);
          const dist = calculateDistance(current.lat, current.lng, OFFICE_LOCATION.lat, OFFICE_LOCATION.lng);
          setDistanceInfo(`${Math.round(dist)}m`);
-         // Descomentar si quieres bloquear por distancia
-         // if (dist > MAX_DISTANCE_METERS) setIsOutOfRange(true);
+         // if (dist > MAX_DISTANCE_METERS) setIsOutOfRange(true); // Descomentar para bloquear por GPS
       },
       (err) => console.warn('GPS Error:', err),
       { enableHighAccuracy: true, timeout: 5000 }
@@ -187,12 +185,10 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
       const res = await fetch(capturedImage);
       const blob = await res.blob();
       const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
-
-      // Compresión
       const compressed = await compressImage(file);
       const fileName = `${currentUser.id}_${Date.now()}.jpg`;
 
-      // Subida
+      // 1. Subir Foto
       const { error: uploadError } = await supabase.storage
         .from('asistencias') 
         .upload(fileName, compressed, { contentType: 'image/jpeg', upsert: false });
@@ -203,7 +199,7 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
         .from('asistencias')
         .getPublicUrl(fileName);
 
-      // Guardado
+      // 2. Insertar Registro
       const { error: dbError } = await supabase.from('attendance_logs').insert({
         user_id: currentUser.id,
         check_type: determinedType, 
@@ -216,8 +212,8 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
 
       setStep('success');
       setTimeout(() => {
-        onSuccess?.();
-        onClose();
+        onSuccess?.(); 
+        onClose();     
       }, 2000);
     } catch (e: any) {
       console.error(e);
@@ -233,9 +229,8 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
     <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4 animate-in fade-in">
       <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl relative">
 
-        {/* HEADER DINÁMICO */}
         <div className={`p-4 text-center text-white font-black uppercase tracking-widest transition-colors ${
-            step === 'blocked' && isAutoClosed ? 'bg-rose-600' : // Rojo si fue automático
+            step === 'blocked' && isAutoClosed ? 'bg-rose-600' :
             step === 'blocked' ? 'bg-slate-500' :
             determinedType === 'ENTRADA' ? 'bg-emerald-500' : 
             determinedType === 'SALIDA' ? 'bg-orange-500' : 'bg-[#0a1e3f]'
@@ -247,41 +242,30 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
 
         <div className="p-4 bg-slate-900 relative min-h-[400px] flex flex-col justify-center items-center">
           
-          {/* ESTADO 1: VERIFICANDO */}
-          {step === 'checking' && (
-              <Loader2 className="animate-spin text-white w-12 h-12"/>
-          )}
+          {step === 'checking' && <Loader2 className="animate-spin text-white w-12 h-12"/>}
 
-          {/* ESTADO 2: BLOQUEADO (YA CHECÓ O CIERRE AUTO) */}
           {step === 'blocked' && (
               <div className="text-center text-white px-6 animate-in zoom-in">
                   {isAutoClosed ? (
-                      // 🔴 MENSAJE DE CIERRE AUTOMÁTICO
                       <>
                         <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-rose-500">
                             <Clock className="w-10 h-10 text-rose-500"/>
                         </div>
                         <h3 className="text-xl font-black uppercase mb-2 text-rose-400">Sin Checada de Salida</h3>
                         <p className="text-sm opacity-90 leading-relaxed">
-                            El sistema cerró tu jornada automáticamente a las 18:00 hrs porque no registraste tu salida.
+                            Jornada cerrada automáticamente.
                         </p>
-                        <div className="mt-6 bg-rose-900/50 p-3 rounded-xl border border-rose-500/30">
-                            <p className="text-[10px] font-bold uppercase text-rose-300">Esto quedará registrado en tu reporte.</p>
-                        </div>
                       </>
                   ) : (
-                      // 🟢 MENSAJE NORMAL
                       <>
                         <ShieldAlert className="w-16 h-16 text-emerald-400 mx-auto mb-4"/>
                         <h3 className="text-xl font-bold uppercase mb-2">¡Todo Listo!</h3>
-                        <p className="text-sm opacity-80">Ya has completado tus registros de Entrada y Salida por hoy.</p>
-                        <p className="text-xs mt-4 text-slate-400">Nos vemos mañana.</p>
+                        <p className="text-sm opacity-80">Ya has completado tus registros de hoy.</p>
                       </>
                   )}
               </div>
           )}
 
-          {/* ESTADO 3: CÁMARA ACTIVA */}
           {step === 'camera' && (
             <>
               <video ref={videoRef} autoPlay playsInline muted className="w-full h-80 object-cover rounded-xl -scale-x-100 bg-black" />
@@ -299,32 +283,27 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
             </>
           )}
 
-          {/* ESTADO 4: PREVIEW DE FOTO */}
           {step === 'preview' && capturedImage && (
             <img src={capturedImage} className="w-full h-80 object-cover rounded-xl -scale-x-100 border-4 border-white shadow-lg" alt="preview" />
           )}
 
-          {/* ESTADO 5: ÉXITO */}
           {step === 'success' && (
             <div className="h-80 flex flex-col items-center justify-center text-white animate-in zoom-in">
               <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6">
                 <CheckCircle2 size={64} className="text-emerald-400" />
               </div>
               <p className="font-black text-2xl uppercase tracking-tight">¡Registrado!</p>
-              <p className="text-emerald-200 text-sm font-bold mt-1 uppercase">{determinedType} Exitosa</p>
             </div>
           )}
 
           <canvas ref={canvasRef} width={640} height={480} className="hidden" />
         </div>
 
-        {/* FOOTER / BOTONES */}
         <div className="p-5 flex gap-4 bg-white border-t border-slate-100">
             <button onClick={onClose} className="p-4 bg-slate-50 rounded-2xl hover:bg-slate-100 text-slate-500 transition-colors border border-slate-200">
                 <X />
             </button>
 
-            {/* BOTÓN CAPTURAR */}
             {step === 'camera' && (
               <button
                 onClick={handleCapture}
@@ -339,7 +318,6 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
               </button>
             )}
 
-            {/* BOTÓN CONFIRMAR */}
             {step === 'preview' && (
               <>
                 <button onClick={() => setStep('camera')} className="p-4 bg-slate-50 rounded-2xl hover:bg-slate-100 text-slate-500 transition-colors border border-slate-200">
@@ -356,8 +334,6 @@ export default function AttendanceModal({ isOpen, onClose, currentUser, onSucces
                 </button>
               </>
             )}
-            
-            {/* Si está bloqueado, el botón de cerrar (X) es suficiente */}
         </div>
       </div>
     </div>
