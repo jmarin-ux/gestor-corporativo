@@ -7,6 +7,7 @@ import {
   ClipboardCheck, FileText, RotateCcw, UserCog, Lock
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
+import { useRBAC } from '@/hooks/useRBAC'; // <--- IMPORTAMOS EL HOOK
 
 const cleanText = (text: string) => {
     return (text || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -29,6 +30,9 @@ export default function ServiceDetailModal({
 }) {
   const [loading, setLoading] = useState(false);
   
+  // --- HOOK DE PERMISOS ---
+  const { can } = useRBAC(currentUser?.role);
+
   // --- ESTADOS ---
   const [status, setStatus] = useState(ticket?.status || 'pendiente');
   const [scheduledDate, setScheduledDate] = useState(ticket?.scheduled_date ? ticket.scheduled_date.split('T')[0] : '');
@@ -45,48 +49,55 @@ export default function ServiceDetailModal({
   const [actionsDone, setActionsDone] = useState(ticket?.service_done_comment || ''); 
 
   // --- FILTROS DE PERSONAL ---
+  // (Esto se mantiene igual porque depende de los datos de staff, no de permisos)
   const coordinatorsList = staff.filter(u => {
       const r = (u.role || '').toLowerCase();
-      return ['coordinador', 'admin', 'superadmin'].includes(r);
+      return ['coordinador', 'admin', 'superadmin', 'gerente'].includes(r);
   });
 
   const operativesOnly = staff.filter(u => (u.role || '').toLowerCase() === 'operativo');
   const leaders = operativesOnly.filter(u => cleanText(u.position + ' ' + u.technical_level).includes('lider'));
   const auxiliaries = operativesOnly.filter(u => !cleanText(u.position + ' ' + u.technical_level).includes('lider'));
 
-  // --- PERMISOS Y BLOQUEO DE SEGURIDAD ---
-  const role = (currentUser?.role || '').toLowerCase().trim();
-  
-  // 1. Normalizar estatus actual para verificar bloqueo
+  // --- REGLAS DE NEGOCIO Y BLOQUEO ---
   const currentStatusLower = (ticket?.status || '').toLowerCase().trim();
   const lockedStatuses = ['realizado', 'ejecutado', 'revision_interna', 'cerrado', 'cancelado'];
 
-  // 🔒 BLOQUEO MAESTRO: Si está en estatus final y NO soy superadmin, todo se bloquea.
-  const isStatusLocked = lockedStatuses.includes(currentStatusLower) && role !== 'superadmin';
+  // 1. ¿Está bloqueado por estatus? (Regla de Negocio)
+  // Superadmin siempre puede editar, ignorando el bloqueo.
+  const isSuperAdmin = currentUser?.role === 'superadmin';
+  const isStatusLocked = lockedStatuses.includes(currentStatusLower) && !isSuperAdmin;
 
-  // Permisos base (si no está bloqueado por estatus)
-  const isSuperOrAdmin = ['admin', 'superadmin'].includes(role);
-  const canEditBase = ['admin', 'superadmin', 'coordinador'].includes(role);
-  const canEditReportBase = ['admin', 'superadmin', 'coordinador', 'operativo'].includes(role);
+  // 2. ¿Tiene permiso por rol? (RBAC)
+  const hasEditPermission = can('tickets', 'edit'); 
+  const hasReportPermission = can('tickets', 'report') || can('tickets', 'edit'); // Si edita, usualmente puede reportar
 
-  // Permisos Finales (Aplicando el bloqueo)
-  const canEdit = canEditBase && !isStatusLocked;
-  const canEditReport = canEditReportBase && !isStatusLocked;
+  // 3. Permiso Final (Combinado)
+  const canEdit = hasEditPermission && !isStatusLocked;
+  const canEditReport = hasReportPermission && !isStatusLocked;
 
+  // --- LISTA DE ESTATUS DISPONIBLES ---
+  // Simplificamos esto usando lógica básica, ya que los roles complejos ahora se manejan con RBAC
   const availableStatuses = useMemo(() => {
       const options = [
-          { value: 'pendiente', label: 'Pendiente', roles: ['admin', 'superadmin', 'coordinador'] },
-          { value: 'asignado', label: 'Asignado (Automático)', roles: ['admin', 'superadmin'] },
-          { value: 'in_progress', label: 'En Proceso', roles: ['admin', 'superadmin', 'coordinador'] },
-          { value: 'ejecutado', label: 'Ejecutado', roles: ['operativo', 'admin', 'superadmin', 'coordinador'] }, 
-          { value: 'realizado', label: 'Realizado', roles: ['coordinador', 'admin', 'superadmin'] },
-          { value: 'revision_interna', label: 'Revisión Control Interno', roles: ['admin', 'superadmin'] },
-          { value: 'cerrado', label: 'Cerrado', roles: ['admin', 'superadmin'] },
-          { value: 'cancelado', label: 'Cancelado', roles: ['admin', 'superadmin'] },
-          { value: 'qa', label: 'QA / Garantía', roles: ['admin', 'superadmin', 'coordinador'] },
+          { value: 'pendiente', label: 'Pendiente' },
+          { value: 'asignado', label: 'Asignado (Automático)' },
+          { value: 'in_progress', label: 'En Proceso' },
+          { value: 'ejecutado', label: 'Ejecutado' }, 
+          { value: 'realizado', label: 'Realizado' },
+          { value: 'revision_interna', label: 'Revisión Control Interno' },
+          { value: 'cerrado', label: 'Cerrado' },
+          { value: 'cancelado', label: 'Cancelado' },
+          { value: 'qa', label: 'QA / Garantía' },
       ];
-      return options.filter(opt => opt.roles.includes(role));
-  }, [role]);
+      
+      // Si es operativo (no tiene permiso de editar completo), limitamos lo que ve
+      if (!hasEditPermission && hasReportPermission) {
+          return options.filter(o => ['en_proceso', 'ejecutado'].includes(o.value));
+      }
+      
+      return options;
+  }, [hasEditPermission, hasReportPermission]);
 
   // 🟢 ACCIÓN: REGRESAR A PENDIENTES
   const handleReturnToPending = async () => {
@@ -127,8 +138,8 @@ export default function ServiceDetailModal({
 
   // --- GUARDAR ---
   const handleSave = async () => {
-    // Alerta de seguridad crítica
-    if ((status === 'revision_interna' || status === 'realizado') && role !== 'superadmin') {
+    // Alerta de seguridad
+    if ((status === 'revision_interna' || status === 'realizado') && !isSuperAdmin) {
         const confirmSave = confirm("⚠️ ALERTA DE BLOQUEO \n\nAl cambiar el estatus a TERMINADO, este ticket se bloqueará y ya no podrás editarlo. ¿Continuar?");
         if (!confirmSave) return;
     }
@@ -136,7 +147,6 @@ export default function ServiceDetailModal({
     setLoading(true);
     try {
         let finalStatus = status;
-        // Auto-asignación de estatus si asignan fecha y líder
         if (scheduledDate && selectedLeader && status === 'pendiente') {
             finalStatus = 'in_progress';
         }
@@ -263,8 +273,8 @@ export default function ServiceDetailModal({
                 {/* ACCIONES (Derecha) */}
                 <div className="lg:col-span-5 space-y-6">
                     
-                    {/* 🟢 SECCIÓN: GESTIÓN DE COORDINACIÓN (SOLO ADMIN/SUPERADMIN) */}
-                    {isSuperOrAdmin && (
+                    {/* GESTIÓN DE COORDINACIÓN (SOLO SI TIENE PERMISO) */}
+                    {hasEditPermission && (
                         <div className="bg-white p-6 rounded-[2rem] shadow-lg border-2 border-indigo-100 relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
                             <h3 className="font-black text-xs uppercase tracking-widest text-indigo-900 mb-5 flex items-center gap-2">
@@ -275,7 +285,7 @@ export default function ServiceDetailModal({
                                 <div className="relative">
                                     <UserCog className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400" size={16}/>
                                     <select 
-                                        disabled={isStatusLocked && role !== 'superadmin'}
+                                        disabled={!canEdit}
                                         value={selectedCoordinator}
                                         onChange={(e) => setSelectedCoordinator(e.target.value)}
                                         className="w-full bg-indigo-50/50 border border-indigo-100 rounded-xl py-3 pl-10 pr-4 text-xs font-bold text-slate-700 outline-none focus:border-indigo-500 transition-all appearance-none uppercase cursor-pointer disabled:opacity-50"
@@ -344,7 +354,7 @@ export default function ServiceDetailModal({
                                 </div>
                             </div>
 
-                            {/* BOTÓN: REGRESAR A PENDIENTES (Solo si no está bloqueado) */}
+                            {/* BOTÓN: REGRESAR A PENDIENTES */}
                             {canEdit && (scheduledDate || selectedLeader) && !isStatusLocked && (
                                 <button 
                                     onClick={handleReturnToPending}
@@ -393,7 +403,7 @@ export default function ServiceDetailModal({
                     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
                         <div className="space-y-4">
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Estatus Actual ({role})</label>
+                                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Estatus Actual</label>
                                 <select 
                                     disabled={!canEdit}
                                     value={status}
@@ -420,7 +430,7 @@ export default function ServiceDetailModal({
                             </div>
                             
                             {/* BOTÓN GUARDAR (SOLO SI NO ESTÁ BLOQUEADO) */}
-                            {(!isStatusLocked || role === 'superadmin') && (canEdit || canEditReport) && (
+                            {(!isStatusLocked || isSuperAdmin) && (canEdit || canEditReport) && (
                                 <button 
                                     onClick={handleSave} 
                                     disabled={loading}

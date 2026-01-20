@@ -34,11 +34,10 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
     );
   }, [allStaff]);
 
-  // 2. HELPER: OBTENER NOMBRE CORTO (Para tarjetas compactas)
+  // 2. HELPER: OBTENER NOMBRE CORTO
   const getStaffName = (id: string) => {
     if (!id) return 'S/A';
     const staff = allStaff.find(s => s.id === id);
-    // Retorna solo el primer nombre o '...'
     return staff ? staff.full_name.split(' ')[0] : '...';
   };
 
@@ -159,11 +158,12 @@ export default function PlannerView({ currentUser, onBack }: { currentUser: any,
                         </div>
                     </div>
 
+                    {/* BOTÓN RENOMBRADO AQUÍ 👇 */}
                     <button 
                         onClick={() => setIsCreateModalOpen(true)}
                         className="w-full bg-[#00C897] hover:bg-emerald-400 text-[#0a1e3f] py-2 rounded-lg font-black text-[10px] uppercase shadow-sm transition-all flex items-center justify-center gap-1.5 active:scale-95"
                     >
-                        <Plus size={12} strokeWidth={3}/> Nueva Solicitud
+                        <Plus size={12} strokeWidth={3}/> Programación Semanal
                     </button>
                 </div>
 

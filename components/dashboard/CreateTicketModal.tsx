@@ -6,6 +6,7 @@ import {
   Calendar, Users, UserPlus, Briefcase, Zap, Flag 
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
+import { useRBAC } from '@/hooks/useRBAC'; // <--- IMPORTAMOS EL HOOK
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -20,6 +21,9 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
   const [initialLoading, setInitialLoading] = useState(true);
   const [searchingAssets, setSearchingAssets] = useState(false);
   
+  // --- HOOK DE PERMISOS ---
+  const { can } = useRBAC(currentUser?.role);
+
   const [clients, setClients] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   
@@ -100,7 +104,6 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
   const searchAssetsInServer = async (term: string) => {
     setSearchingAssets(true);
     try {
-        // Corrected OR syntax for Supabase
         const { data, error } = await supabase
             .from('assets')
             .select('*, clients(organization)')
@@ -118,15 +121,29 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
 
   const generateAutoCode = () => {
     const now = new Date();
+    // Padding para asegurar que el mes siempre tenga 2 dígitos (ej: 01 en lugar de 1)
     const month = (now.getMonth() + 1).toString().padStart(2, '0'); 
+    // Año a 2 dígitos (ej: 26)
     const year = now.getFullYear().toString().slice(-2); 
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const randomStr = Array(3).fill(0).map(() => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+    
+    // Generar 3 caracteres aleatorios
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const randomStr = Array(3)
+      .fill(0)
+      .map(() => chars.charAt(Math.floor(Math.random() * chars.length)))
+      .join('');
+      
+    // Resultado: AU0126XYZ
     return `AU${month}${year}${randomStr}`;
   };
 
   // --- SUBMISSION HANDLER ---
   const handleSubmit = async () => {
+    // 🔐 VALIDACIÓN DE PERMISO ANTES DE GUARDAR
+    if (!can('tickets', 'create')) {
+        return alert("No tienes permiso para crear tickets.");
+    }
+
     if (!formData.description) return alert("Falta descripción.");
     if (clientMode === 'existing' && !formData.clientId) return alert("Selecciona cliente.");
     if (clientMode === 'new' && !formData.manualClientName) return alert("Nombre de cliente obligatorio.");
@@ -137,12 +154,11 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
         let finalClientId = formData.clientId;
 
         // Determine Location Logic
-        let finalLocation = 'SITIO DEL CLIENTE'; // Default safe value
+        let finalLocation = 'SITIO DEL CLIENTE'; 
         
         if (clientMode === 'new') {
-            finalLocation = formData.manualClientName; // Use company name for new clients
+            finalLocation = formData.manualClientName; 
         } else {
-            // If existing client, try to get organization name
             const clientObj = clients.find(c => c.id === finalClientId);
             if (clientObj) {
                 finalLocation = clientObj.organization || clientObj.full_name || 'OFICINAS';
@@ -150,15 +166,16 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
         }
 
         // --- COORDINATOR AUTO-ASSIGNMENT LOGIC ---
-        // If current user is a coordinator, auto-assign ticket to them
+        // Usamos el rol para determinar si se auto-asigna, pero validamos que sea coordinador
         let coordinatorAssigned = null;
-        if (currentUser?.role === 'coordinador') {
-            coordinatorAssigned = currentUser.id;
+        if (currentUser?.role === 'coordinador' || currentUser?.role === 'admin' || currentUser?.role === 'superadmin') {
+             // Si es coordinador (o superior) creando el ticket, se asume que él lo coordina inicialmente
+             coordinatorAssigned = currentUser.id;
         }
 
         const newTicket = {
             description: formData.description,
-            // ❌ ELIMINADO EL CAMPO 'title' PARA EVITAR EL ERROR DE SCHEMA
+            // ❌ ELIMINADO EL CAMPO 'title'
             codigo_servicio: generatedCode,
             service_type: 'Autogestión',
             status: formData.leaderId ? 'asignado' : 'pendiente',
@@ -179,8 +196,8 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
             technical_lead_id: formData.leaderId || null,
             auxiliary_id: formData.auxiliarId || null,
             
-            coordinator_id: coordinatorAssigned, // <--- Auto-assign coordinator here
-            created_by: currentUser?.id, // Track creator
+            coordinator_id: coordinatorAssigned, 
+            created_by: currentUser?.id, 
             
             technical_level: 'autogestion'
         };
@@ -190,7 +207,10 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
 
         // Optional: Update asset location if assigned to a client
         if (clientMode === 'existing' && formData.assetId && finalClientId) {
-            await supabase.from('assets').update({ client_id: finalClientId }).eq('id', formData.assetId);
+            // Validamos permiso para editar activos antes de hacerlo automáticamente
+            if (can('assets', 'edit')) {
+                await supabase.from('assets').update({ client_id: finalClientId }).eq('id', formData.assetId);
+            }
         }
 
         alert(`✅ Autogestión Generada: ${generatedCode}`);
@@ -220,7 +240,7 @@ export default function CreateTicketModal({ isOpen, onClose, currentUser, onSucc
           <div>
             <div className="flex items-center gap-2">
                 <FileText className="text-[#00C897]" /> 
-                <h2 className="text-xl font-black uppercase tracking-tight">Nueva Autogestión</h2>
+                <h2 className="text-xl font-black uppercase tracking-tight">Programación Semanal</h2>
                 <span className="bg-[#00C897] text-[#0a1e3f] text-[10px] px-2 py-0.5 rounded font-bold">V6.3 FINAL</span>
             </div>
             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1 pl-8">

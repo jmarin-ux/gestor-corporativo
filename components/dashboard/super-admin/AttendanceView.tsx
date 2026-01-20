@@ -11,7 +11,10 @@ import {
   User,
   ArrowRight,
   Filter,
-  ChevronDown
+  ChevronDown,
+  AlertTriangle,
+  LogOut,
+  CheckCircle2
 } from 'lucide-react';
 
 export default function AttendanceView() {
@@ -42,9 +45,10 @@ export default function AttendanceView() {
     init();
   }, []);
 
-  // 2. LÓGICA DE PRESETS
+  // 2. LÓGICA DE PRESETS (QUINCENA, SEMANA, ETC)
   const applyPreset = (preset: string) => {
       const now = new Date();
+      // Ajuste para trabajar con fechas locales limpias
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       
       let start = new Date(today);
@@ -52,21 +56,25 @@ export default function AttendanceView() {
 
       switch (preset) {
           case 'hoy':
+              // Start y End son hoy
               break;
           
           case 'semana':
-              const day = today.getDay() || 7; 
+              // Lunes a Domingo de la semana actual
+              const day = today.getDay() || 7; // Domingo es 7
               if (day !== 1) start.setDate(today.getDate() - (day - 1));
               end.setDate(start.getDate() + 6);
               break;
 
           case 'quincena':
+              // Regla: Día 1-15 (1ra Q) o 16-Fin (2da Q)
               const currentDay = today.getDate();
               if (currentDay <= 15) {
                   start.setDate(1);
                   end.setDate(15);
               } else {
                   start.setDate(16);
+                  // Truco para último día del mes
                   end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
               }
               break;
@@ -77,10 +85,12 @@ export default function AttendanceView() {
               break;
 
           case 'custom':
+              // No cambiamos las fechas, el usuario elige
               setSelectedPreset('custom');
               return;
       }
 
+      // Convertimos a string YYYY-MM-DD local
       const toLocalISO = (d: Date) => {
           const offset = d.getTimezoneOffset() * 60000;
           return new Date(d.getTime() - offset).toISOString().split('T')[0];
@@ -97,9 +107,12 @@ export default function AttendanceView() {
     if (!currentUser || !startDate || !endDate) return;
     setLoading(true);
     
-    // Configuración de fechas
+    // Inicio: Día seleccionado a las 00:00:00 local
     const startObj = new Date(`${startDate}T00:00:00`); 
+    // Fin: Día seleccionado a las 23:59:59.999 local
     const endObj = new Date(`${endDate}T23:59:59.999`);
+
+    // Convertimos a UTC para Supabase
     const startIso = startObj.toISOString();
     const endIso = endObj.toISOString();
 
@@ -113,16 +126,9 @@ export default function AttendanceView() {
       .lte('created_at', endIso)
       .order('created_at', { ascending: true });
 
-    // 🔐 SEGURIDAD: LÓGICA DE VISIBILIDAD ACTUALIZADA
-    const role = (currentUser.role || '').toLowerCase().trim();
-    
-    // Lista de roles que tienen PERMISO DE VER TODO
-    // Si agregas nuevos roles de alto nivel (ej. 'rh'), agrégalos aquí.
-    const canViewAll = ['admin', 'superadmin', 'coordinador', 'gerente'];
-
-    // Si el rol del usuario NO está en la lista de privilegiados, forzamos filtro por SU ID.
-    // Esto asegura que 'operativo', 'lider', 'auxiliar', etc., solo vean lo suyo.
-    if (!canViewAll.includes(role)) {
+    // 🔐 SEGURIDAD: Filtro por Rol
+    const role = (currentUser.role || '').toLowerCase();
+    if (!['admin', 'superadmin', 'coordinador', 'gerente'].includes(role)) {
        query = query.eq('user_id', currentUser.id);
     }
 
@@ -131,19 +137,21 @@ export default function AttendanceView() {
 
     const rawLogs = data || [];
 
-    // AGRUPACIÓN (Entrada + Salida)
+    // 🧩 AGRUPACIÓN UNIFICADA (Entrada + Salida + Salida Automática)
     const groups: Record<string, any> = {};
 
     rawLogs.forEach((log) => {
+        // Usamos la fecha LOCAL para agrupar visualmente
         const logDateObj = new Date(log.created_at);
-        const logDate = logDateObj.toLocaleDateString('en-CA');
+        const logDate = logDateObj.toLocaleDateString('en-CA'); // YYYY-MM-DD local
         const userId = log.user_id;
         const key = `${userId}_${logDate}`;
 
         if (!groups[key]) {
             groups[key] = {
                 id: key,
-                date: logDate,
+                user_id: log.user_id,
+                date: logDate, 
                 user: log.profiles,
                 entrada: null,
                 salida: null
@@ -152,7 +160,9 @@ export default function AttendanceView() {
 
         if (log.check_type === 'ENTRADA') {
             if (!groups[key].entrada) groups[key].entrada = log;
-        } else if (log.check_type === 'SALIDA') {
+        } 
+        // Aceptamos tanto la salida manual como la automática para cerrar la jornada
+        else if (log.check_type === 'SALIDA' || log.check_type === 'SALIDA_AUTO') {
             groups[key].salida = log;
         }
     });
@@ -169,14 +179,72 @@ export default function AttendanceView() {
     fetchAndGroupLogs();
   }, [fetchAndGroupLogs]);
 
-  // Sub-componente Celda
-  const TimeCell = ({ log, type }: { log: any, type: 'ENTRADA' | 'SALIDA' }) => {
-      if (!log) return (
-          <div className="flex items-center gap-2 opacity-30 py-2">
-              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
-              <span className="text-[10px] font-bold uppercase italic text-slate-400">--:--</span>
-          </div>
-      );
+  // 🟢 ACCIÓN: CIERRE MANUAL (SOLO SUPERADMIN)
+  const handleManualClose = async (userId: string, date: string, name: string) => {
+    const isSuperAdmin = currentUser?.role?.toLowerCase() === 'superadmin';
+    if (!isSuperAdmin) return;
+
+    if (!confirm(`¿Deseas cerrar manualmente la jornada de ${name} para el día ${date}?`)) return;
+
+    // Se fuerza el registro a las 18:00 (UTC-6 aproximado para el string ISO)
+    const forcedCheckout = `${date}T18:00:00.000Z`;
+
+    const { error } = await supabase.from('attendance_logs').insert({
+        user_id: userId,
+        check_type: 'SALIDA_AUTO',
+        created_at: forcedCheckout,
+        latitude: 0,
+        longitude: 0,
+        photo_url: 'https://via.placeholder.com/150?text=CIERRE_MANUAL_ADMIN'
+    });
+
+    if (error) {
+        alert("Error al cerrar: " + error.message);
+    } else {
+        fetchAndGroupLogs(); // Recargar tabla
+    }
+  };
+
+  // Sub-componente de Celda de Tiempo
+  const TimeCell = ({ log, type, userId, date, name }: { log: any, type: 'ENTRADA' | 'SALIDA', userId?: string, date?: string, name?: string }) => {
+      const isSuperAdmin = currentUser?.role?.toLowerCase() === 'superadmin';
+
+      if (!log) {
+          // Si falta la SALIDA y el usuario es SUPERADMIN, mostrar botón de cierre
+          if (type === 'SALIDA' && isSuperAdmin) {
+            return (
+                <button 
+                    onClick={() => handleManualClose(userId!, date!, name!)}
+                    className="flex items-center gap-2 px-3 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-all shadow-sm active:scale-95"
+                    title="Cerrar Jornada"
+                >
+                    <LogOut size={14}/>
+                    <span className="text-[10px] font-black uppercase">Cerrar</span>
+                </button>
+            );
+          }
+          return (
+            <div className="flex items-center gap-2 opacity-30 py-2">
+                <div className="w-2 h-2 rounded-full bg-slate-300"></div>
+                <span className="text-[10px] font-bold uppercase italic text-slate-400">--:--</span>
+            </div>
+          );
+      }
+
+      // Visualización especial para SALIDA AUTOMÁTICA (ROJO)
+      if (log.check_type === 'SALIDA_AUTO') {
+        return (
+            <div className="flex items-center justify-between p-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 min-w-[160px]">
+                <div className="flex items-center gap-2">
+                     <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
+                     <div className="flex flex-col">
+                         <span className="text-[9px] font-black uppercase leading-none">Sin Checada</span>
+                         <span className="text-xs font-black mt-1">06:00 p.m.</span>
+                     </div>
+                </div>
+            </div>
+        );
+      }
 
       const isEntrada = type === 'ENTRADA';
       const badgeClass = isEntrada ? 'bg-emerald-500' : 'bg-orange-500';
@@ -362,14 +430,20 @@ export default function AttendanceView() {
 
                                     {/* SALIDA */}
                                     <td className="p-5">
-                                        <TimeCell log={row.salida} type="SALIDA" />
+                                        <TimeCell 
+                                          log={row.salida} 
+                                          type="SALIDA" 
+                                          userId={row.user_id} 
+                                          date={row.date} 
+                                          name={row.user?.full_name} 
+                                        />
                                     </td>
 
                                     {/* ESTATUS */}
                                     <td className="p-5 text-center">
                                         {row.entrada && row.salida ? (
-                                            <span className="inline-flex px-3 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-[9px] font-black uppercase tracking-wider">
-                                                Completa
+                                            <span className="inline-flex px-3 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-[9px] font-black uppercase tracking-wider items-center gap-1">
+                                                <CheckCircle2 size={10}/> Completa
                                             </span>
                                         ) : row.entrada ? (
                                             <span className="inline-flex px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[9px] font-black uppercase tracking-wider animate-pulse">
