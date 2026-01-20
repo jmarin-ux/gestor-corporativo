@@ -30,8 +30,9 @@ export default function ServiceDetailModal({
   
   // Estados Locales
   const [status, setStatus] = useState(ticket?.status || 'pendiente');
-  // Fecha: Si existe, la usamos. Si no, cadena vacía.
+  // Fecha: Si existe, la usamos y cortamos la parte de la hora. Si no, cadena vacía.
   const [scheduledDate, setScheduledDate] = useState(ticket?.scheduled_date ? ticket.scheduled_date.split('T')[0] : '');
+  // IDs de asignación (Strings vacíos si es null)
   const [selectedLeader, setSelectedLeader] = useState(ticket?.technical_lead_id || ticket?.leader_id || '');
   const [selectedAux, setSelectedAux] = useState(ticket?.auxiliary_id || '');
   const [notes, setNotes] = useState('');
@@ -51,6 +52,7 @@ export default function ServiceDetailModal({
   const role = (currentUser?.role || '').toLowerCase();
   const canEdit = ['admin', 'superadmin', 'coordinador'].includes(role);
 
+  // 🟢 FUNCIÓN DE GUARDADO INTELIGENTE (AUTO-HISTORIAL)
   const handleSave = async () => {
     setLoading(true);
     try {
@@ -63,24 +65,66 @@ export default function ServiceDetailModal({
             auxiliary_id: selectedAux || null,
         };
 
+        // --- DETECCIÓN DE CAMBIOS PARA EL HISTORIAL ---
+        let changeLog: string[] = [];
+
+        // 1. Detectar cambio de Estatus
+        if (status !== ticket.status) {
+            changeLog.push(`Estatus actualizado a: ${status.toUpperCase()}`);
+        }
+
+        // 2. Detectar cambio de Fecha
+        const oldDate = ticket.scheduled_date ? ticket.scheduled_date.split('T')[0] : '';
+        if (scheduledDate !== oldDate) {
+            changeLog.push(`Fecha reprogramada para: ${scheduledDate || 'Sin fecha'}`);
+        }
+
+        // 3. Detectar cambio de Líder
+        // Usamos '!=' para comparar aunque uno sea string y otro number
+        const oldLeader = ticket.technical_lead_id || ticket.leader_id || '';
+        if (selectedLeader != oldLeader) { 
+             const leaderName = staff.find(s => s.id == selectedLeader)?.full_name || 'Sin Asignar';
+             changeLog.push(`Líder asignado: ${leaderName}`);
+        }
+
+        // 4. Detectar cambio de Auxiliar
+        const oldAux = ticket.auxiliary_id || '';
+        if (selectedAux != oldAux) {
+             const auxName = staff.find(s => s.id == selectedAux)?.full_name || 'Sin Asignar';
+             changeLog.push(`Auxiliar asignado: ${auxName}`);
+        }
+
+        // 5. Agregar nota manual si el usuario escribió algo
         if (notes.trim()) {
+            changeLog.push(`Nota: ${notes}`);
+        }
+
+        // --- SI HUBO ALGÚN CAMBIO, GUARDAMOS EL LOG ---
+        if (changeLog.length > 0) {
+            const finalNote = changeLog.join('. '); // Unimos los cambios en un solo texto
+
             const newLog = {
                 date: new Date().toISOString(),
                 user: currentUser.full_name || 'Sistema',
-                note: notes,
-                type: 'manual_update'
+                note: finalNote,
+                type: 'system_update' 
             };
+
+            // Recuperamos logs anteriores asegurando que sea un array
             let currentLogs = ticket.logs || [];
             if (typeof currentLogs === 'string') {
                 try { currentLogs = JSON.parse(currentLogs); } catch(e) { currentLogs = []; }
             }
+            
+            // Agregamos el nuevo log al principio
             updates.logs = [newLog, ...currentLogs];
         }
 
+        // Actualizamos en Supabase
         const { error } = await supabase.from('tickets').update(updates).eq('id', ticket.id);
         if (error) throw error;
 
-        alert('✅ Servicio actualizado y programado.');
+        alert('✅ Servicio actualizado correctamente.');
         if (onUpdate) onUpdate();
         onClose();
 
@@ -150,25 +194,30 @@ export default function ServiceDetailModal({
                     {/* Historial */}
                     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
                         <h3 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
-                            <Clock size={14}/> Historial
+                            <Clock size={14}/> Historial de Movimientos
                         </h3>
                         <div className="space-y-4 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-                            {ticket.logs && Array.isArray(ticket.logs) ? (
+                            {ticket.logs && Array.isArray(ticket.logs) && ticket.logs.length > 0 ? (
                                 ticket.logs.map((log: any, i: number) => (
                                     <div key={i} className="flex gap-3 text-xs border-l-2 border-slate-200 pl-3 py-1">
-                                        <div className="text-slate-400 font-bold min-w-[70px]">{new Date(log.date).toLocaleDateString()}</div>
-                                        <div><span className="font-black text-slate-700 uppercase">{log.user}: </span><span className="text-slate-600">{log.note}</span></div>
+                                        <div className="text-slate-400 font-bold min-w-[70px]">
+                                            {new Date(log.date).toLocaleDateString('es-MX', {day: '2-digit', month:'2-digit'})}
+                                        </div>
+                                        <div>
+                                            <span className="font-black text-slate-700 uppercase">{log.user}: </span>
+                                            <span className="text-slate-600">{log.note}</span>
+                                        </div>
                                     </div>
                                 ))
-                            ) : <p className="text-xs text-slate-300 italic">Sin registros.</p>}
+                            ) : <p className="text-xs text-slate-300 italic">Sin registros previos.</p>}
                         </div>
                     </div>
                 </div>
 
-                {/* DERECHA: ACCIONES (AQUÍ ESTÁ LO NUEVO) */}
+                {/* DERECHA: ACCIONES */}
                 <div className="lg:col-span-5 space-y-6">
                     
-                    {/* 🟢 SECCIÓN DE PROGRAMACIÓN (SI NO VES ESTO, NO SE ACTUALIZÓ EL ARCHIVO) */}
+                    {/* SECCIÓN DE PROGRAMACIÓN */}
                     <div className="bg-white p-6 rounded-[2rem] shadow-lg border-2 border-blue-100 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-emerald-400"></div>
                         <h3 className="font-black text-xs uppercase tracking-widest text-[#0a1e3f] mb-5 flex items-center gap-2">
@@ -227,11 +276,11 @@ export default function ServiceDetailModal({
                         </div>
                     </div>
 
-                    {/* ESTATUS */}
+                    {/* ESTATUS Y NOTAS */}
                     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
                         <div className="space-y-4">
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Estatus</label>
+                                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Estatus Actual</label>
                                 <select 
                                     disabled={!canEdit}
                                     value={status}
@@ -246,10 +295,10 @@ export default function ServiceDetailModal({
                                 </select>
                             </div>
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Nota Interna</label>
+                                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1 block">Nota Interna (Opcional)</label>
                                 <textarea 
                                     disabled={!canEdit}
-                                    placeholder="Nota sobre el cambio..." 
+                                    placeholder="Escribe una nota manual si deseas..." 
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none h-20 resize-none"
                                     value={notes}
                                     onChange={(e) => setNotes(e.target.value)}
