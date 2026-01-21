@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 
 // --- COMPONENTES ---
 import PlannerView from '@/components/dashboard/PlannerView';
@@ -126,9 +126,6 @@ export default function DashboardPage() {
 
       const role = (profile.role || '').toLowerCase().trim();
       
-      // ⚠️ COMENTADO PARA PERMITIR ACCESO A OPERATIVOS A ESTE PANEL
-      // if (['operativo', 'staff', 'technician'].includes(role)) { router.replace('/dashboard-staff'); return; }
-      
       if (['client', 'cliente'].includes(role)) { router.replace('/accesos/cliente'); return; }
 
       if (alive) {
@@ -156,19 +153,18 @@ export default function DashboardPage() {
     });
   }, [data.tickets, filters]);
 
-  // 👇 4. CONFIGURACIÓN DE PESTAÑAS (AQUÍ ESTABA EL DETALLE)
+  // 👇 4. CONFIGURACIÓN DE PESTAÑAS (CORREGIDO: Sin duplicados)
   const visibleTabs = useMemo(() => {
-      // Pestañas BASE que TODOS ven (incluido Operativos)
-      // Agregamos 'asistencia' aquí para que aparezca
-      const tabs: Tab[] = ['operaciones', 'planificador', 'asistencia','activos'];
+      // Pestañas BASE que TODOS ven
+      const tabs: Tab[] = ['operaciones', 'planificador', 'asistencia'];
 
       // Pestañas EXTRA para ADMIN y SUPERADMIN
       if (['superadmin', 'admin'].includes(currentUserRole)) {
-          tabs.push('personal', 'clientes', 'activos');
+          tabs.push('personal', 'clientes', 'activos'); // ✅ Agregamos activos aquí
       } 
       // Pestañas EXTRA para COORDINADOR
       else if (currentUserRole === 'coordinador') {
-          tabs.push('clientes');
+          tabs.push('clientes', 'activos'); // ✅ Coordinador también ve activos
       }
       
       return tabs;
@@ -293,7 +289,7 @@ export default function DashboardPage() {
             </div>
         )}
         
-        {/* 👇 5. RENDERIZADO DE LA VISTA DE ASISTENCIA */}
+        {/* VISTA DE ASISTENCIA */}
         {activeTab === 'asistencia' && (
             <div className="animate-in fade-in zoom-in-95 duration-300">
                 <AttendanceView />
@@ -310,9 +306,15 @@ export default function DashboardPage() {
                 <ClientsSection currentUser={user} />
             </div>
         )}
+        {/* 👇 VISTA DE ACTIVOS (CORREGIDA: CONECTADA A DATOS) */}
         {activeTab === 'activos' && visibleTabs.includes('activos') && (
             <div className="animate-in fade-in zoom-in-95 duration-300">
-                <AssetsTab currentUser={user} />
+                <AssetsTab 
+                    assets={data.assets} 
+                    clients={data.clients} 
+                    currentUser={user} 
+                    onRefresh={() => fetchData(user)} 
+                />
             </div>
         )}
 
